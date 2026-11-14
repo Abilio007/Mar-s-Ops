@@ -1,17 +1,26 @@
 import { appState, getRegionById } from '../../core/state.js';
 import { setMarsStageMode } from '../home/mars-globe.js';
-import { formatDate, formatDistance, getRiskLabel, getStatusLabel } from '../../utils/formatters.js';
+import { formatDate, formatDistance, getStatusLabel } from '../../utils/formatters.js';
 import { escapeHtml } from '../../utils/helpers.js';
 import { showPriorityConfirmSwal } from '../../utils/sweetalerts.js';
 import { travelService } from './travel-service.js';
 import { renderTripForm } from './travel-form.js';
 import { createTravelMapView } from './travel-map.js';
 import { renderMissionCalendar } from './travel-calendar.js';
+import { showToast } from '../../core/events.js';
 
 export function createTravelPlannerView() {
   let categoryFilter = 'all';
   let activeMapView = null;
   let routeSeed = null;
+
+  function getMissionTypeLabel(value) {
+    return appState.catalog.missionTypes.find((type) => type.value === value)?.label || value;
+  }
+
+  function getRiskToleranceLabel(value) {
+    return appState.catalog.riskTolerances.find((risk) => risk.value === value)?.label || value;
+  }
 
   function unmountActiveSubView() {
     if (activeMapView) {
@@ -40,8 +49,10 @@ export function createTravelPlannerView() {
           <button type="button" class="segmented__btn ${categoryFilter === 'completed' ? 'is-active' : ''}" data-cat="completed">Concluídas (${travelService.getByStatus('completed').length})</button>
         </div>
 
-        <button type="button" class="btn btn--primary" id="btn-new-trip-inline">+ Criar Viagem</button>
+        <button type="button" class="btn btn--primary" id="btn-new-trip-inline" ${!appState.backendUser ? 'disabled' : ''}>+ Criar Viagem</button>
       </div>
+
+      ${!appState.backendUser ? '<p class="panel__meta">Inicie sessão em Definições para consultar e gerir as suas missões no servidor.</p>' : ''}
 
       ${visibleCats
         .map((cat) => {
@@ -69,7 +80,7 @@ export function createTravelPlannerView() {
                                 <div class="meta-line" style="margin-bottom: 6px;">
                                   <span class="status-text ${statusClass}">${escapeHtml(getStatusLabel(trip.status))}</span>
                                   <span class="meta-line__sep" aria-hidden="true">·</span>
-                                  <span>${escapeHtml(trip.missionType)}</span>
+                                  <span>${escapeHtml(getMissionTypeLabel(trip.missionType))}</span>
                                 </div>
                                 <h3 class="trip-card__title">${escapeHtml(trip.name)}</h3>
                                 <p class="trip-card__route">${escapeHtml(origin.name)} → ${escapeHtml(dest.name)}</p>
@@ -143,13 +154,17 @@ export function createTravelPlannerView() {
         const confirmed = await showPriorityConfirmSwal({
           priority: 'P2',
           title: 'Eliminar Viagem',
-          text: `Tem a certeza de que pretende eliminar a missão "${trip.name}"? Esta ação remove os dados do armazenamento local.`,
+          text: `Tem a certeza de que pretende eliminar a missão "${trip.name}" do servidor?`,
           confirmText: 'Eliminar',
           cancelText: 'Cancelar',
         });
         if (confirmed) {
-          travelService.deleteTrip(trip.id);
-          renderTripsList(stageEl, rootContainer);
+          try {
+            await travelService.deleteTrip(trip.id);
+            renderTripsList(stageEl, rootContainer);
+          } catch (error) {
+            showToast({ title: 'Não foi possível eliminar a missão', message: error.message, variant: 'warn' });
+          }
         }
       });
     });
@@ -164,10 +179,10 @@ export function createTravelPlannerView() {
     }
 
     const summary = travelService.computeRouteSummary(trip.originId, trip.destinationId, trip.waypoints);
-    const equipment = travelService.getDefaultEquipment(trip.missionType, summary.hasRiskZones);
+    const equipment = travelService.getDefaultEquipment(trip.missionType);
     const schedule = travelService.buildSchedule(trip);
     const readyCount = (trip.checklist || []).filter((c) => c.done).length;
-    const totalChecklist = (trip.checklist || []).length || 1;
+    const totalChecklist = (trip.checklist || []).length;
 
     stageEl.innerHTML = `
       <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4);">
@@ -196,11 +211,11 @@ export function createTravelPlannerView() {
             </div>
             <div class="metric-cell">
               <div class="metric-cell__label">Tolerância de Risco</div>
-              <div class="metric-cell__value">${escapeHtml(getRiskLabel(trip.riskTolerance))}</div>
+              <div class="metric-cell__value">${escapeHtml(getRiskToleranceLabel(trip.riskTolerance))}</div>
             </div>
             <div class="metric-cell">
               <div class="metric-cell__label">Tipo de Missão</div>
-              <div class="metric-cell__value">${escapeHtml(trip.missionType)}</div>
+              <div class="metric-cell__value">${escapeHtml(getMissionTypeLabel(trip.missionType))}</div>
             </div>
           </div>
           ${trip.notes ? `<p class="panel__meta"><strong>Observações:</strong> ${escapeHtml(trip.notes)}</p>` : ''}
@@ -248,7 +263,8 @@ export function createTravelPlannerView() {
             <span class="panel__meta tabular-nums">${readyCount} / ${totalChecklist} prontos</span>
           </div>
           <div class="checklist">
-            ${(trip.checklist || [])
+            ${(trip.checklist || []).length
+              ? (trip.checklist || [])
               .map(
                 (item) => `
                 <label class="checklist-item">
@@ -257,14 +273,15 @@ export function createTravelPlannerView() {
                 </label>
               `
               )
-              .join('')}
+              .join('')
+                : '<p class="panel__meta">O servidor não forneceu itens de preparação para esta missão.</p>'}
           </div>
 
           <div style="margin-top: var(--space-4);">
             <h3 class="panel__title" style="font-size: 0.95rem; margin-bottom: var(--space-2);">Alertas Associados à Rota</h3>
             ${
               summary.relatedAlerts.length === 0
-                ? '<p class="panel__meta">Sem alertas críticos diretamente sobre os pontos da rota.</p>'
+                ? '<p class="panel__meta">Sem alertas do servidor associados às regiões da rota.</p>'
                 : summary.relatedAlerts
                     .map(
                       (a) => `<p class="panel__meta" style="color: #ff8a8a; margin-bottom: 4px;">▲ ${escapeHtml(a.title)}</p>`
@@ -300,15 +317,17 @@ export function createTravelPlannerView() {
 
     stageEl.querySelectorAll('[data-set-status]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        travelService.updateStatus(trip.id, btn.dataset.setStatus);
-        renderTripDetails(stageEl, rootContainer);
+        travelService.updateStatus(trip.id, btn.dataset.setStatus)
+          .then(() => renderTripDetails(stageEl, rootContainer))
+          .catch((error) => showToast({ title: 'Não foi possível atualizar a missão', message: error.message, variant: 'warn' }));
       });
     });
 
     stageEl.querySelectorAll('[data-check-item]').forEach((cb) => {
       cb.addEventListener('change', () => {
-        travelService.toggleChecklistItem(trip.id, cb.dataset.checkItem);
-        renderTripDetails(stageEl, rootContainer);
+        travelService.toggleChecklistItem(trip.id, cb.dataset.checkItem)
+          .then(() => renderTripDetails(stageEl, rootContainer))
+          .catch((error) => showToast({ title: 'Não foi possível atualizar a lista', message: error.message, variant: 'warn' }));
       });
     });
   }
@@ -404,7 +423,7 @@ export function createTravelPlannerView() {
     mount(container, params = {}) {
       if (params?.prefillDestinationId) {
         routeSeed = {
-          originId: params.prefillDestinationId === 'elysium' ? 'oxia' : 'elysium',
+          originId: appState.regions.find((region) => region.id !== params.prefillDestinationId)?.id || null,
           destinationId: params.prefillDestinationId,
           waypoints: [],
         };

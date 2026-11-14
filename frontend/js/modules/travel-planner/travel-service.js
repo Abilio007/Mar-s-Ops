@@ -1,4 +1,4 @@
-import { appState, getRegionById, logActivity, notifyIfEnabled } from '../../core/state.js';
+import { appState, getRegionById, notifyIfEnabled } from '../../core/state.js';
 import { backendApi } from '../../core/backend-api.js';
 import { calculateRouteMetrics } from '../../utils/helpers.js';
 
@@ -31,7 +31,7 @@ export const travelService = {
     };
   },
 
-  getDefaultEquipment(missionType, hasRiskZones) {
+  getDefaultEquipment(missionType) {
     return appState.catalog.equipmentByMissionType?.[missionType] || [];
   },
 
@@ -56,7 +56,6 @@ export const travelService = {
     if (idx === -1) appState.trips.unshift(savedTrip);
     else appState.trips[idx] = savedTrip;
 
-    logActivity(`${existingId ? 'Viagem atualizada' : 'Nova viagem criada'}: ${savedTrip.name}`);
     notifyIfEnabled('tripUpdates', {
       title: existingId ? 'Viagem Atualizada' : 'Missão Criada',
       message: `${savedTrip.name} guardada no servidor.`,
@@ -71,7 +70,6 @@ export const travelService = {
     if (!target) return;
     await backendApi.deleteMission(tripId);
     appState.trips = appState.trips.filter((t) => t.id !== tripId);
-    logActivity(`Viagem eliminada: ${target.name}`);
     notifyIfEnabled('tripUpdates', {
       title: 'Viagem Eliminada',
       message: `${target.name} foi removida.`,
@@ -84,7 +82,6 @@ export const travelService = {
     if (!trip) return;
     const updated = await backendApi.updateMissionStatus(tripId, nextStatus);
     appState.trips[appState.trips.findIndex((item) => item.id === tripId)] = updated;
-    logActivity(`Estado da viagem "${trip.name}" alterado para ${nextStatus}`);
     notifyIfEnabled('missionMilestones', {
       title: 'Estado da Missão Atualizado',
       message: `${trip.name} está agora ${nextStatus === 'active' ? 'Em Andamento' : nextStatus === 'completed' ? 'Concluída' : 'Planeada'}.`,

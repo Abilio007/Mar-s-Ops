@@ -13,6 +13,7 @@ class MarsDataController extends Controller
                 'missionTypes' => config('mars.mission_types'),
                 'riskTolerances' => config('mars.risk_tolerances'),
                 'equipmentByMissionType' => config('mars.equipment_by_mission_type'),
+                'cruiseSpeedKmPerHour' => config('mars.cruise_speed_km_per_hour'),
             ],
         ]);
     }

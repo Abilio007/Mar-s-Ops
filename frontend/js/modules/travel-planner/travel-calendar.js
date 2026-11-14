@@ -4,7 +4,8 @@ import { escapeHtml } from '../../utils/helpers.js';
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
 export function renderMissionCalendar(container, { onSelectTrip }) {
-  let viewDate = new Date(2026, 10, 1); // November 2026 default matching initial demo trips
+  const now = new Date();
+  let viewDate = new Date(now.getFullYear(), now.getMonth(), 1);
 
   function render() {
     const year = viewDate.getFullYear();

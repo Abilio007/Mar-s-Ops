@@ -1,6 +1,5 @@
 import { storage, STORAGE_KEYS } from '../storage.js';
 import { eventBus, showToast } from './events.js';
-import { generateId } from '../utils/helpers.js';
 import { backendApi } from './backend-api.js';
 
 storage.removeLegacyDemoData();
@@ -45,9 +44,6 @@ export const DEFAULT_SETTINGS = {
     tripUpdates: true,
     routeChanges: true,
     missionMilestones: true,
-  },
-  privacy: {
-    trackActivityLog: true,
   },
 };
 
@@ -99,10 +95,6 @@ function mergeSettings(saved) {
       ...DEFAULT_SETTINGS.notifications,
       ...(saved.notifications || {}),
     },
-    privacy: {
-      ...DEFAULT_SETTINGS.privacy,
-      ...(saved.privacy || {}),
-    },
   };
 }
 
@@ -115,12 +107,11 @@ export const appState = {
   settingsSubTab: 'general', // 'general' | 'notifications' | 'privacy' | 'about'
   settings: mergeSettings(storage.get(STORAGE_KEYS.SETTINGS)),
   regions: [],
-  catalog: { missionTypes: [], riskTolerances: [], equipmentByMissionType: {} },
+  catalog: { missionTypes: [], riskTolerances: [], equipmentByMissionType: {}, cruiseSpeedKmPerHour: 0 },
   catalogStatus: 'loading',
   trips: [],
   alerts: [],
   chatHistory: [],
-  activityLog: storage.get(STORAGE_KEYS.ACTIVITY, []),
   backendUser: null,
   apiStatus: 'disconnected',
   reverbStatus: 'disconnected',
@@ -139,17 +130,6 @@ export function getRegionById(regionId) {
   return appState.regions.find((region) => region.id === regionId) || null;
 }
 
-export function logActivity(action) {
-  if (!appState.settings.privacy.trackActivityLog) return;
-  appState.activityLog.unshift({
-    id: generateId('act'),
-    timestamp: new Date().toISOString(),
-    action,
-  });
-  appState.activityLog = appState.activityLog.slice(0, 40);
-  storage.set(STORAGE_KEYS.ACTIVITY, appState.activityLog);
-}
-
 export function notifyIfEnabled(categoryKey, payload) {
   if (appState.settings.notifications?.[categoryKey]) {
     showToast(payload);
@@ -163,10 +143,6 @@ export function updateSettings(partial) {
     notifications: {
       ...appState.settings.notifications,
       ...(partial.notifications || {}),
-    },
-    privacy: {
-      ...appState.settings.privacy,
-      ...(partial.privacy || {}),
     },
   });
   storage.set(STORAGE_KEYS.SETTINGS, appState.settings);
@@ -196,11 +172,6 @@ export async function acknowledgeAlert(alertId) {
   if (!alert?.serverId || !appState.backendUser) return;
   const updated = await backendApi.acknowledgeAlert(alert.serverId);
   alert.acknowledged = updated.acknowledged;
-  logActivity(
-    alert.acknowledged
-      ? `Alerta marcado como verificado (${alert.priority || 'P2'}): ${alert.title}`
-      : `Alerta reaberto (${alert.priority || 'P2'}): ${alert.title}`
-  );
   eventBus.emit('alerts:changed', appState.alerts);
 }
 

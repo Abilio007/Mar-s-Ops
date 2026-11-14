@@ -176,7 +176,7 @@ export async function showEmergencyCenterSwal({ onFocusGlobe = null, onAlertsUpd
                 <div>
                   <div class="swal-center-item__title">${escapeHtml(alert.title)}</div>
                   <div class="swal-center-item__meta">
-                    ${escapeHtml(region.name)} · ${alert.acknowledged ? 'Verificado' : 'Ativo'}
+                    ${escapeHtml(region?.name || 'Sem região associada')} · ${alert.acknowledged ? 'Verificado' : 'Ativo'}
                   </div>
                 </div>
                 <span class="swal-priority-badge swal-priority-badge--${meta.level}" style="margin-bottom: 0; flex-shrink: 0;">

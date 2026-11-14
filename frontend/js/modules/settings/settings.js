@@ -1,13 +1,10 @@
 import {
   appState,
   DEFAULT_SETTINGS,
-  INITIAL_TRIPS,
-  logActivity,
   updateSettings,
 } from '../../core/state.js';
 import { showToast } from '../../core/events.js';
-import { storage, STORAGE_KEYS } from '../../storage.js';
-import { formatTimestamp } from '../../utils/formatters.js';
+import { storage } from '../../storage.js';
 import { escapeHtml } from '../../utils/helpers.js';
 import { showEmergencyCenterSwal, showPriorityConfirmSwal } from '../../utils/sweetalerts.js';
 import { backendApi } from '../../core/backend-api.js';
@@ -389,13 +386,11 @@ export function createSettingsView() {
 
       bodyEl.querySelector('#set-language')?.addEventListener('change', (e) => {
         updateSettings({ language: e.target.value });
-        logActivity(`Idioma alterado para ${e.target.value.toUpperCase()}`);
         showToast({ title: 'Idioma atualizado', variant: 'safe' });
       });
 
       bodyEl.querySelector('#set-theme')?.addEventListener('change', (e) => {
         updateSettings({ theme: e.target.value });
-        logActivity(`Tema visual alterado para ${e.target.value}`);
         showToast({ title: 'Tema atualizado', variant: 'safe' });
       });
 
@@ -430,8 +425,7 @@ export function createSettingsView() {
           <div class="panel__header">
             <h2 class="panel__title">Notificações</h2>
             <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-              <button type="button" class="btn btn--danger btn--sm" id="btn-test-swal">Emergências (Prioridades)</button>
-              <button type="button" class="btn btn--secondary btn--sm" id="btn-test-toast">Testar</button>
+              <button type="button" class="btn btn--danger btn--sm" id="btn-show-alerts">Alertas do servidor</button>
               <button type="button" class="btn btn--ghost btn--sm" id="settings-close-panel">Fechar</button>
             </div>
           </div>
@@ -440,7 +434,7 @@ export function createSettingsView() {
             <div class="setting-row">
               <div class="setting-row__info">
                 <div class="setting-row__title">Alertas de Risco</div>
-                <div class="setting-row__desc">Avisos ao selecionar ou cruzar zonas perigosas.</div>
+                <div class="setting-row__desc">Avisos recebidos do backend quando existem eventos ativos.</div>
               </div>
               <label class="switch">
                 <input type="checkbox" data-notif="riskAlerts" ${n.riskAlerts ? 'checked' : ''} />
@@ -473,7 +467,7 @@ export function createSettingsView() {
             <div class="setting-row">
               <div class="setting-row__info">
                 <div class="setting-row__title">Notificações de Missões</div>
-                <div class="setting-row__desc">Avisos de progresso e marcos simulados.</div>
+                <div class="setting-row__desc">Avisos de progresso recebidos do backend.</div>
               </div>
               <label class="switch">
                 <input type="checkbox" data-notif="missionMilestones" ${n.missionMilestones ? 'checked' : ''} />
@@ -495,23 +489,14 @@ export function createSettingsView() {
         });
       });
 
-      bodyEl.querySelector('#btn-test-swal')?.addEventListener('click', () => {
+      bodyEl.querySelector('#btn-show-alerts')?.addEventListener('click', () => {
         showEmergencyCenterSwal();
-      });
-
-      bodyEl.querySelector('#btn-test-toast')?.addEventListener('click', () => {
-        showToast({
-          title: 'Sistema de Notificações Operacional',
-          message: 'Os avisos do MARTE estão ativos.',
-          variant: 'safe',
-        });
       });
       return;
     }
 
     if (appState.settingsSubTab === 'privacy') {
       const kb = (storage.getStorageUsageBytes() / 1024).toFixed(2);
-      const p = s.privacy;
 
       bodyEl.innerHTML = `
         <div class="panel">
@@ -526,56 +511,12 @@ export function createSettingsView() {
           <div class="settings-group">
             <div class="setting-row">
               <div class="setting-row__info">
-                <div class="setting-row__title">Guardar Histórico do Assistente IA</div>
-                <div class="setting-row__desc">Controla a cópia local. As conversas autenticadas ficam no servidor até serem apagadas no chat.</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="priv-chat" ${p.saveChatHistory ? 'checked' : ''} />
-                <span class="switch__track"><span class="switch__thumb"></span></span>
-              </label>
-            </div>
-
-            <div class="setting-row">
-              <div class="setting-row__info">
-                <div class="setting-row__title">Registar Histórico de Atividades</div>
-                <div class="setting-row__desc">Armazena localmente ações recentes.</div>
-              </div>
-              <label class="switch">
-                <input type="checkbox" id="priv-activity" ${p.trackActivityLog ? 'checked' : ''} />
-                <span class="switch__track"><span class="switch__thumb"></span></span>
-              </label>
-            </div>
-
-            <div class="setting-row">
-              <div class="setting-row__info">
-                <div class="setting-row__title">Limpeza de Dados</div>
-                <div class="setting-row__desc">Limpar histórico ou restaurar dados iniciais.</div>
+                <div class="setting-row__title">Origem e retenção dos dados</div>
+                <div class="setting-row__desc">Missões, alertas, posições e conversas são obtidos do servidor. Preferências visuais ficam neste navegador.</div>
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                <button type="button" class="btn btn--secondary btn--sm" id="btn-clear-activity">Limpar Atividades</button>
-                <button type="button" class="btn btn--danger btn--sm" id="btn-reset-all-data">Repor Tudo</button>
+                <button type="button" class="btn btn--danger btn--sm" id="btn-reset-local-settings">Limpar preferências locais</button>
               </div>
-            </div>
-          </div>
-
-          <div style="margin-top: var(--space-4);">
-            <h3 class="panel__title" style="font-size: 0.92rem; margin-bottom: var(--space-2);">Atividades Recentes</h3>
-            <div class="activity-log">
-              ${
-                appState.activityLog.length === 0
-                  ? '<p class="panel__meta">Nenhuma atividade registada.</p>'
-                  : appState.activityLog
-                      .slice(0, 10)
-                      .map(
-                        (item) => `
-                        <div class="activity-log__item">
-                          <span>${escapeHtml(item.action)}</span>
-                          <span class="tabular-nums" style="color: var(--color-text-muted);">${escapeHtml(formatTimestamp(item.timestamp))}</span>
-                        </div>
-                      `
-                      )
-                      .join('')
-              }
             </div>
           </div>
         </div>
@@ -586,36 +527,18 @@ export function createSettingsView() {
         renderCategoryContent(container);
       });
 
-      bodyEl.querySelector('#priv-chat')?.addEventListener('change', (e) => {
-        updateSettings({ privacy: { saveChatHistory: e.target.checked } });
-      });
-
-      bodyEl.querySelector('#priv-activity')?.addEventListener('change', (e) => {
-        updateSettings({ privacy: { trackActivityLog: e.target.checked } });
-      });
-
-      bodyEl.querySelector('#btn-clear-activity')?.addEventListener('click', () => {
-        appState.activityLog = [];
-        storage.remove(STORAGE_KEYS.ACTIVITY);
-        showToast({ title: 'Atividades limpas', variant: 'safe' });
-        renderCategoryContent(container);
-      });
-
-      bodyEl.querySelector('#btn-reset-all-data')?.addEventListener('click', async () => {
+      bodyEl.querySelector('#btn-reset-local-settings')?.addEventListener('click', async () => {
         const confirmed = await showPriorityConfirmSwal({
           priority: 'P1',
-          title: 'Repor Dados Locais',
-          text: 'Pretende limpar todas as viagens, conversas e preferências e restaurar os dados de demonstração?',
-          confirmText: 'Repor Dados',
+          title: 'Limpar Preferências Locais',
+          text: 'Esta ação não altera missões, alertas ou conversas guardados no servidor.',
+          confirmText: 'Limpar Preferências',
           cancelText: 'Cancelar',
         });
         if (confirmed) {
           storage.clearAllAppStorage();
-          appState.trips = structuredClone(INITIAL_TRIPS);
-          storage.set(STORAGE_KEYS.TRIPS, appState.trips);
-          appState.activityLog = [];
           updateSettings(structuredClone(DEFAULT_SETTINGS));
-          showToast({ title: 'Dados locais restaurados', variant: 'safe' });
+          showToast({ title: 'Preferências locais limpas', variant: 'safe' });
           renderCategoryContent(container);
         }
       });
@@ -630,7 +553,7 @@ export function createSettingsView() {
         </div>
 
         <p style="color: var(--color-text-secondary); line-height: 1.6; font-size: 0.9rem;">
-          <strong>MARTE — Rastreador de Exploração</strong> é uma plataforma web modular de acompanhamento e planeamento de missões em Marte, com globo 3D interativo, monitorização simulada, assistente inteligente e planeador de viagens.
+          <strong>MARTE — Rastreador de Exploração</strong> é uma plataforma web modular de acompanhamento e planeamento de missões em Marte, com globo 3D interativo, monitorização através de dados recebidos do backend, assistente e planeador.
         </p>
 
         <div class="about-specs">
@@ -644,7 +567,7 @@ export function createSettingsView() {
           </div>
           <div class="metric-cell">
             <div class="metric-cell__label">Tecnologias</div>
-            <div class="metric-cell__value" style="font-size: 0.82rem;">HTML5, CSS3, ES6+, Three.js, LocalStorage</div>
+            <div class="metric-cell__value" style="font-size: 0.82rem;">HTML5, CSS3, ES6+, Three.js, Laravel API, Reverb</div>
           </div>
           <div class="metric-cell">
             <div class="metric-cell__label">Créditos</div>

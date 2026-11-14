@@ -1,18 +1,17 @@
-import { appState, getRegionById, MARS_REGIONS, notifyIfEnabled, logActivity } from '../../core/state.js';
+import { appState, getRegionById, notifyIfEnabled } from '../../core/state.js';
 import { getSharedMarsGlobe, setMarsStageMode } from '../home/mars-globe.js';
 import { travelService } from './travel-service.js';
-import { formatCoordinates, formatDistance, formatTemperature } from '../../utils/formatters.js';
+import { formatCoordinates, formatDistance } from '../../utils/formatters.js';
 import { escapeHtml } from '../../utils/helpers.js';
-import { showPriorityToastSwal } from '../../utils/sweetalerts.js';
 import { showPriorityConfirmSwal } from '../../utils/sweetalerts.js';
-import { storage, STORAGE_KEYS } from '../../storage.js';
 import { backendApi } from '../../core/backend-api.js';
 import { refreshBackendData } from '../../core/backend-integration.js';
+import { showToast } from '../../core/events.js';
 
 export function createTravelMapView({ onCreateTripWithRoute }) {
-  let originId = 'elysium';
-  let destinationId = 'jezero';
-  let waypoints = ['gale'];
+  let originId = null;
+  let destinationId = null;
+  let waypoints = [];
   let activeTripId = null;
   let apiRoute = null;
   let apiBusy = false;
@@ -31,10 +30,13 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
     const dest = getRegionById(destinationId);
     const origin = getRegionById(originId);
     const distUnit = appState.settings.distanceUnit;
-    const tempUnit = appState.settings.temperatureUnit;
 
     const summaryEl = container.querySelector('#route-summary-panel');
     if (!summaryEl) return;
+    if (!origin || !dest) {
+      summaryEl.innerHTML = '<div class="empty-state">O servidor ainda não disponibilizou regiões para planeamento.</div>';
+      return;
+    }
 
     summaryEl.innerHTML = `
       <div class="panel__header">
@@ -48,7 +50,7 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
         <div class="field">
           <label class="field__label" for="route-origin">Origem</label>
           <select id="route-origin" class="field__control">
-            ${MARS_REGIONS.map(
+            ${appState.regions.map(
               (r) => `<option value="${r.id}" ${originId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`
             ).join('')}
           </select>
@@ -57,7 +59,7 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
         <div class="field">
           <label class="field__label" for="route-destination">Destino</label>
           <select id="route-destination" class="field__control">
-            ${MARS_REGIONS.map(
+            ${appState.regions.map(
               (r) => `<option value="${r.id}" ${destinationId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`
             ).join('')}
           </select>
@@ -69,7 +71,7 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
           <span class="field__label">Pontos de Passagem (${waypoints.length})</span>
           <div style="display: flex; gap: 6px;">
             <select id="route-add-wp-select" class="field__control" style="min-height: 36px; padding: 4px 8px; font-size: 0.82rem;">
-              ${MARS_REGIONS.filter((r) => r.id !== originId && r.id !== destinationId && !waypoints.includes(r.id))
+              ${appState.regions.filter((r) => r.id !== originId && r.id !== destinationId && !waypoints.includes(r.id))
                 .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
                 .join('')}
             </select>
@@ -110,24 +112,14 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
           <div class="metric-cell__value tabular-nums">${summary.estimatedDays} Sóis (${summary.estimatedHours} h)</div>
         </div>
         <div class="metric-cell">
-          <div class="metric-cell__label">Temperatura Destino</div>
-          <div class="metric-cell__value tabular-nums">${escapeHtml(formatTemperature(dest.tempCelsius, tempUnit))}</div>
-        </div>
-        <div class="metric-cell">
-          <div class="metric-cell__label">Zonas de Risco na Rota</div>
-          <div class="metric-cell__value ${summary.hasRiskZones ? 'status-text--danger' : 'status-text--safe'}">
-            ${summary.hasRiskZones ? `▲ ${summary.riskRegions.length} zona(s) de demonstração` : '● Sem zonas de demonstração'}
-          </div>
+          <div class="metric-cell__label">Alertas nos pontos selecionados</div>
+          <div class="metric-cell__value">${summary.relatedAlerts.length}</div>
         </div>
       </div>
 
-      ${
-        summary.hasRiskZones
-          ? `<p class="panel__meta" style="margin-top: var(--space-3); color: #ff8a8a;">
-              Aviso demonstrativo: esta trajetória passa por ${summary.riskRegions.map((r) => r.name).join(', ')}. Não é uma avaliação de segurança.
-            </p>`
-          : ''
-      }
+      <p class="panel__meta" style="margin-top: var(--space-3);">
+        O cálculo geométrico não avalia perigos. Use o planeador do servidor para consultar os dados cartografados disponíveis.
+      </p>
 
       <div class="planner-form__actions">
         ${
@@ -135,7 +127,7 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
             ? `<button type="button" class="btn btn--secondary" id="btn-save-route-to-trip">Atualizar Rota da Viagem</button>`
             : ''
         }
-        <button type="button" class="btn btn--primary" id="btn-use-route-new-trip">
+        <button type="button" class="btn btn--primary" id="btn-use-route-new-trip" ${!appState.backendUser ? 'disabled' : ''}>
           Criar Viagem com esta Rota
         </button>
       </div>
@@ -206,14 +198,6 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
       apiError = '';
       updateGlobeRoute();
       renderPanel(container);
-      const reg = getRegionById(destinationId);
-      if (reg.category === 'dangerous' && appState.settings.notifications?.riskAlerts) {
-        showPriorityToastSwal({
-          priority: reg.riskLevel === 'critico' ? 'P1' : 'P2',
-          title: `Destino de Risco: ${reg.name}`,
-          message: reg.conditions,
-        });
-      }
     });
 
     summaryEl.querySelector('#btn-add-waypoint')?.addEventListener('click', () => {
@@ -222,14 +206,6 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
         waypoints.push(sel.value);
         updateGlobeRoute();
         renderPanel(container);
-        const reg = getRegionById(sel.value);
-        if (reg.category === 'dangerous' && appState.settings.notifications?.riskAlerts) {
-          showPriorityToastSwal({
-            priority: reg.riskLevel === 'critico' ? 'P1' : 'P2',
-            title: `Passagem em Zona Perigosa: ${reg.name}`,
-            message: reg.conditions,
-          });
-        }
       }
     });
 
@@ -264,21 +240,24 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
       });
     });
 
-    summaryEl.querySelector('#btn-save-route-to-trip')?.addEventListener('click', () => {
+    summaryEl.querySelector('#btn-save-route-to-trip')?.addEventListener('click', async () => {
       const trip = travelService.getById(activeTripId);
-      if (trip) {
-        trip.originId = originId;
-        trip.destinationId = destinationId;
-        trip.waypoints = [...waypoints];
-        trip.distanceKm = summary.distanceKm;
-        trip.estimatedDays = summary.estimatedDays;
-        storage.set(STORAGE_KEYS.TRIPS, appState.trips);
-        logActivity(`Rota atualizada na missão: ${trip.name}`);
-        notifyIfEnabled('routeChanges', {
-          title: 'Alteração de Rota Guardada',
-          message: `Nova trajetória calculada (${formatDistance(summary.distanceKm, distUnit)}).`,
-          variant: 'safe',
-        });
+      if (trip && appState.backendUser) {
+        try {
+          await travelService.saveTrip({
+            ...trip,
+            originId,
+            destinationId,
+            waypoints: [...waypoints],
+          }, trip.id);
+          notifyIfEnabled('routeChanges', {
+            title: 'Alteração de Rota Guardada',
+            message: `A nova rota de ${trip.name} foi guardada no servidor.`,
+            variant: 'safe',
+          });
+        } catch (error) {
+          showToast({ title: 'Não foi possível guardar a rota', message: error.message, variant: 'warn' });
+        }
       }
     });
 
@@ -341,11 +320,11 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
 
   return {
     mount(container, initialRoute = {}) {
-      originId = initialRoute.originId || 'elysium';
-      destinationId = initialRoute.destinationId || appState.selectedRegionId || 'jezero';
-      if (originId === destinationId) {
-        originId = destinationId === 'elysium' ? 'oxia' : 'elysium';
-      }
+      destinationId = initialRoute.destinationId || appState.selectedRegionId || appState.regions[0]?.id || null;
+      originId = initialRoute.originId
+        || appState.regions.find((region) => region.id !== destinationId)?.id
+        || null;
+      if (originId === destinationId) originId = appState.regions.find((region) => region.id !== destinationId)?.id || null;
       waypoints = Array.isArray(initialRoute.waypoints) ? [...initialRoute.waypoints] : [];
       activeTripId = initialRoute.tripId || null;
       apiRoute = null;
@@ -358,10 +337,7 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
         <div class="route-planner-layout">
           <div class="route-globe-spacer">
             <div class="route-globe-spacer__hud">
-              <div class="route-legend">
-                <span class="legend-item"><span class="legend-swatch legend-swatch--safe"></span>Recomendada</span>
-                <span class="legend-item"><span class="legend-swatch legend-swatch--danger"></span>Perigosa</span>
-              </div>
+              <span class="panel__meta">Localizações do catálogo do servidor</span>
               <button type="button" class="btn btn--secondary btn--sm" id="route-globe-reset">Repor Vista</button>
             </div>
           </div>
@@ -379,13 +355,7 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
             updateGlobeRoute();
             renderPanel(container);
             const reg = getRegionById(destinationId);
-            if (reg.category === 'dangerous' && appState.settings.notifications?.riskAlerts) {
-              showPriorityToastSwal({
-                priority: reg.riskLevel === 'critico' ? 'P1' : 'P2',
-                title: `Destino de Risco: ${reg.name}`,
-                message: reg.conditions,
-              });
-            }
+            if (!reg) return;
           }
         });
         updateGlobeRoute();

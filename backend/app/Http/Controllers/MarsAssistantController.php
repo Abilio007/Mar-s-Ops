@@ -50,7 +50,7 @@ class MarsAssistantController extends Controller
         $response = $agent->prompt(
             trim($validated['message']),
             provider: (string) config('services.mars.ai_provider', 'gemini'),
-            model: (string) config('services.mars.ai_model', 'gemini-2.5-flash'),
+            model: (string) config('services.mars.ai_model', 'gemini-3.5-flash-lite'),
             timeout: (int) config('services.mars.ai_timeout', 45),
         );
 

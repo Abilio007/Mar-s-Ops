@@ -37,7 +37,7 @@ return [
 
     'mars' => [
         'ai_provider' => env('MARS_AI_PROVIDER', 'gemini'),
-        'ai_model' => env('MARS_AI_MODEL', 'gemini-2.5-flash'),
+        'ai_model' => env('MARS_AI_MODEL', 'gemini-3.5-flash-lite'),
         'ai_timeout' => (int) env('MARS_AI_TIMEOUT', 45),
         'ingest_token' => env('MARS_DATA_INGEST_TOKEN'),
     ],

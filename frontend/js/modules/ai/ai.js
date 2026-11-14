@@ -1,9 +1,7 @@
-import { appState, logActivity } from '../../core/state.js';
-import { storage, STORAGE_KEYS } from '../../storage.js';
-import { queryMarsAssistant } from './ai-service.js';
+import { appState } from '../../core/state.js';
 import { validateChatMessage } from '../../utils/validators.js';
 import { formatTimestamp } from '../../utils/formatters.js';
-import { escapeHtml, generateId } from '../../utils/helpers.js';
+import { escapeHtml } from '../../utils/helpers.js';
 import { backendApi } from '../../core/backend-api.js';
 import { showToast } from '../../core/events.js';
 
@@ -24,17 +22,12 @@ const ROBOT_ICON = `
 export function createAiView() {
   let isProcessing = false;
 
-  function persistChat() {
-    if (appState.settings.privacy.saveChatHistory) {
-      storage.set(STORAGE_KEYS.CHAT, appState.chatHistory);
-    }
-  }
-
   function renderMessages(container) {
     const listEl = container.querySelector('#ai-messages');
     if (!listEl) return;
 
-    listEl.innerHTML = appState.chatHistory
+    listEl.innerHTML = appState.chatHistory.length
+      ? appState.chatHistory
       .map((msg) => {
         const isUser = msg.role === 'user';
         const cardsHtml =
@@ -75,14 +68,13 @@ export function createAiView() {
           </div>
         `;
       })
-      .join('');
+      .join('')
+      : `<div class="empty-state">${appState.backendUser ? 'Ainda não há mensagens nesta conversa.' : 'Inicie sessão para consultar o assistente no servidor.'}</div>`;
 
     if (isProcessing) {
       const processingDiv = document.createElement('div');
       processingDiv.className = 'ai-typing';
-      processingDiv.textContent = appState.backendUser
-        ? 'A consultar o assistente no servidor...'
-        : 'A consultar base de conhecimento local...';
+      processingDiv.textContent = 'A consultar o assistente no servidor...';
       listEl.appendChild(processingDiv);
     }
 
@@ -99,45 +91,29 @@ export function createAiView() {
       return;
     }
     if (errorEl) errorEl.textContent = '';
+    if (!appState.backendUser) {
+      showToast({
+        title: 'Inicie sessão para usar o assistente',
+        message: 'A aplicação não mantém respostas locais de demonstração.',
+        variant: 'warn',
+      });
+      return;
+    }
 
     const inputEl = container.querySelector('#ai-message-input');
     if (inputEl) inputEl.value = '';
-
-    appState.chatHistory.push({
-      id: generateId('msg'),
-      role: 'user',
-      timestamp: new Date().toISOString(),
-      text: validation.value,
-    });
-    persistChat();
 
     isProcessing = true;
     renderMessages(container);
 
     try {
-      const reply = appState.backendUser
-        ? { text: await backendApi.sendChat(validation.value), cards: [] }
-        : await queryMarsAssistant(validation.value);
-      appState.chatHistory.push({
-        id: generateId('msg'),
-        role: 'assistant',
-        timestamp: new Date().toISOString(),
-        text: reply.text,
-        cards: reply.cards || [],
-      });
-      persistChat();
-      logActivity(`Consulta ao assistente IA: "${validation.value.slice(0, 42)}"`);
+      await backendApi.sendChat(validation.value);
+      appState.chatHistory = await backendApi.getConversationHistory();
     } catch (error) {
       showToast({
         title: 'Não foi possível obter resposta',
         message: error.message,
         variant: 'warn',
-      });
-      appState.chatHistory.push({
-        id: generateId('msg'),
-        role: 'assistant',
-        timestamp: new Date().toISOString(),
-        text: `Falha de comunicação: ${error.message}`,
       });
     } finally {
       isProcessing = false;
@@ -157,10 +133,10 @@ export function createAiView() {
               </div>
               <div class="meta-line">
                 <span class="status-text ${appState.backendUser ? 'status-text--safe' : 'status-text--warn'}">
-                  ${appState.backendUser ? '● Assistente no servidor' : '● Base local (demonstração)'}
+                  ${appState.backendUser ? '● Assistente no servidor' : '● Sessão necessária'}
                 </span>
                 <span class="meta-line__sep" aria-hidden="true">·</span>
-                <button type="button" class="btn btn--ghost btn--sm" id="ai-clear-chat">Limpar</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="ai-clear-chat" ${!appState.backendUser ? 'disabled' : ''}>Limpar</button>
               </div>
             </div>
 
@@ -186,8 +162,9 @@ export function createAiView() {
                   class="ai-composer__input"
                   placeholder="Digite sua mensagem..."
                   autocomplete="off"
+                  ${!appState.backendUser ? 'disabled' : ''}
                 />
-                <button type="submit" class="ai-composer__send" aria-label="Enviar mensagem">
+                <button type="submit" class="ai-composer__send" aria-label="Enviar mensagem" ${!appState.backendUser ? 'disabled' : ''}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="22" y1="2" x2="11" y2="13"/>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -201,6 +178,18 @@ export function createAiView() {
       `;
 
       renderMessages(container);
+      if (appState.backendUser) {
+        backendApi.getConversationHistory()
+          .then((messages) => {
+            appState.chatHistory = messages;
+            renderMessages(container);
+          })
+          .catch((error) => showToast({
+            title: 'Não foi possível carregar a conversa',
+            message: error.message,
+            variant: 'warn',
+          }));
+      }
 
       container.querySelector('#ai-chat-form')?.addEventListener('submit', (e) => {
         e.preventDefault();
@@ -228,15 +217,7 @@ export function createAiView() {
           button.disabled = false;
           return;
         }
-        appState.chatHistory = [
-          {
-            id: generateId('msg'),
-            role: 'assistant',
-            timestamp: new Date().toISOString(),
-            text: 'Olá! Sou a IA do Rastreador de Marte.\nComo posso ajudar você hoje?',
-          },
-        ];
-        persistChat();
+        appState.chatHistory = [];
         renderMessages(container);
         button.disabled = false;
       });

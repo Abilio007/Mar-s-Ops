@@ -141,6 +141,14 @@ test('region catalogue and mission records are served from the backend', functio
     $this->assertDatabaseCount('mars_missions', 0);
 });
 
+test('local frontend host aliases can access the API', function () {
+    foreach (['http://localhost:3000', 'http://127.0.0.1:3000'] as $origin) {
+        $this->getJson('/api/data/catalog', ['Origin' => $origin])
+            ->assertOk()
+            ->assertHeader('Access-Control-Allow-Origin', $origin);
+    }
+});
+
 test('alert acknowledgements are persisted and scoped to their owner', function () {
     $hazard = MarsHazard::query()->create([
         'external_id' => 'ack-hazard',

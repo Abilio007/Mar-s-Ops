@@ -77,7 +77,7 @@ class MarsRoutePlanningService
                 ])->all(),
             ], JSON_THROW_ON_ERROR),
             provider: (string) config('services.mars.ai_provider', 'gemini'),
-            model: (string) config('services.mars.ai_model', 'gemini-2.5-flash'),
+            model: (string) config('services.mars.ai_model', 'gemini-3.5-flash-lite'),
             timeout: (int) config('services.mars.ai_timeout', 45),
         );
 

@@ -199,6 +199,7 @@ export async function refreshBackendData() {
 }
 
 export async function loginBackend(credentials) {
+  appState.chatHistory = [];
   appState.backendUser = await backendApi.login(credentials);
   appState.apiStatus = 'connected';
   await refreshBackendData();
@@ -207,6 +208,7 @@ export async function loginBackend(credentials) {
 }
 
 export async function registerBackend(credentials) {
+  appState.chatHistory = [];
   appState.backendUser = await backendApi.register(credentials);
   appState.apiStatus = 'connected';
   await refreshBackendData();
@@ -228,6 +230,7 @@ export async function logoutBackend() {
   appState.activeBackendRoute = null;
   appState.latestHeartbeat = null;
   appState.routeProgress = null;
+  appState.chatHistory = [];
   replaceBackendAlerts([]);
   emitConnectionChange();
 
@@ -262,6 +265,9 @@ export async function initializePublicData() {
     backendApi.getRegions(),
     backendApi.getCatalog(),
   ]);
+  if (!Number.isFinite(catalog.cruiseSpeedKmPerHour) || catalog.cruiseSpeedKmPerHour <= 0) {
+    throw new Error('The backend catalog did not provide a valid route speed.');
+  }
   appState.regions = regions;
   appState.catalog = catalog;
   appState.catalogStatus = 'ready';

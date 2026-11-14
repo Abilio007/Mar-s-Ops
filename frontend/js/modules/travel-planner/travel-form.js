@@ -1,30 +1,43 @@
-import { appState, getRegionById, MARS_REGIONS } from '../../core/state.js';
+import { appState, getRegionById } from '../../core/state.js';
 import { validateTripForm } from '../../utils/validators.js';
 import { escapeHtml } from '../../utils/helpers.js';
-import { showPriorityConfirmSwal } from '../../utils/sweetalerts.js';
 import { travelService } from './travel-service.js';
 import { formatDistance } from '../../utils/formatters.js';
+import { showToast } from '../../core/events.js';
 
 export function renderTripForm(container, { editingTrip, prefillDestinationId, onSaved, onCancel, onPickOnMap }) {
+  if (!appState.backendUser) {
+    container.innerHTML = '<div class="empty-state">Inicie sessão para criar e guardar missões no servidor.</div>';
+    return;
+  }
+  if (!appState.regions.length) {
+    container.innerHTML = '<div class="empty-state">O servidor ainda não disponibilizou regiões para planeamento.</div>';
+    return;
+  }
+
   const isEditing = Boolean(editingTrip);
   const defaultDeparture = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
   const defaultArrival = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
 
   const initial = editingTrip || {
     name: '',
-    originId: 'elysium',
-    destinationId: prefillDestinationId || 'jezero',
+    originId: appState.regions[0].id,
+    destinationId: prefillDestinationId || appState.regions[1]?.id || appState.regions[0].id,
     departureDate: defaultDeparture,
     arrivalDate: defaultArrival,
     participants: 4,
-    missionType: 'Científica',
+    missionType: appState.catalog.missionTypes[0]?.value || '',
     objective: '',
-    riskTolerance: 'baixo',
+    riskTolerance: appState.catalog.riskTolerances[0]?.value || '',
     notes: '',
     waypoints: [],
   };
 
   const destRegion = getRegionById(initial.destinationId);
+  if (!destRegion) {
+    container.innerHTML = '<div class="empty-state">O destino já não existe no catálogo do servidor.</div>';
+    return;
+  }
 
   container.innerHTML = `
     <div class="panel">
@@ -49,8 +62,8 @@ export function renderTripForm(container, { editingTrip, prefillDestinationId, o
           <div class="field">
             <label class="field__label" for="trip-type">Tipo de Missão</label>
             <select id="trip-type" name="missionType" class="field__control">
-              ${['Científica', 'Reconhecimento', 'Colonização', 'Resgate', 'Mineração']
-                .map((type) => `<option value="${type}" ${initial.missionType === type ? 'selected' : ''}>${type}</option>`)
+              ${appState.catalog.missionTypes
+                .map((type) => `<option value="${escapeHtml(type.value)}" ${initial.missionType === type.value ? 'selected' : ''}>${escapeHtml(type.label)}</option>`)
                 .join('')}
             </select>
             <div class="field__error" data-error-for="missionType"></div>
@@ -59,8 +72,8 @@ export function renderTripForm(container, { editingTrip, prefillDestinationId, o
           <div class="field">
             <label class="field__label" for="trip-origin">Local de Partida</label>
             <select id="trip-origin" name="originId" class="field__control">
-              ${MARS_REGIONS.map(
-                (r) => `<option value="${r.id}" ${initial.originId === r.id ? 'selected' : ''}>${escapeHtml(r.name)} (${r.category === 'recommended' ? 'Segura' : 'Risco'})</option>`
+              ${appState.regions.map(
+                (r) => `<option value="${escapeHtml(r.id)}" ${initial.originId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`
               ).join('')}
             </select>
             <div class="field__error" data-error-for="originId"></div>
@@ -69,8 +82,8 @@ export function renderTripForm(container, { editingTrip, prefillDestinationId, o
           <div class="field">
             <label class="field__label" for="trip-destination">Destino em Marte</label>
             <select id="trip-destination" name="destinationId" class="field__control">
-              ${MARS_REGIONS.map(
-                (r) => `<option value="${r.id}" ${initial.destinationId === r.id ? 'selected' : ''}>${escapeHtml(r.name)} (${r.category === 'recommended' ? 'Segura' : 'Risco'})</option>`
+              ${appState.regions.map(
+                (r) => `<option value="${escapeHtml(r.id)}" ${initial.destinationId === r.id ? 'selected' : ''}>${escapeHtml(r.name)}</option>`
               ).join('')}
             </select>
             <div class="field__error" data-error-for="destinationId"></div>
@@ -97,9 +110,9 @@ export function renderTripForm(container, { editingTrip, prefillDestinationId, o
           <div class="field">
             <label class="field__label" for="trip-risk">Nível de Risco Permitido</label>
             <select id="trip-risk" name="riskTolerance" class="field__control">
-              <option value="baixo" ${initial.riskTolerance === 'baixo' ? 'selected' : ''}>Baixo (Apenas zonas recomendadas)</option>
-              <option value="moderado" ${initial.riskTolerance === 'moderado' ? 'selected' : ''}>Moderado (Inclui terreno misto)</option>
-              <option value="elevado" ${initial.riskTolerance === 'elevado' ? 'selected' : ''}>Elevado (Missões críticas)</option>
+              ${appState.catalog.riskTolerances
+                .map((risk) => `<option value="${escapeHtml(risk.value)}" ${initial.riskTolerance === risk.value ? 'selected' : ''}>${escapeHtml(risk.label)}</option>`)
+                .join('')}
             </select>
             <div class="field__error" data-error-for="riskTolerance"></div>
           </div>
@@ -119,9 +132,10 @@ export function renderTripForm(container, { editingTrip, prefillDestinationId, o
         <div class="meta-line" id="form-route-preview" style="margin-top: var(--space-3);">
           <span>Destino selecionado: <strong>${escapeHtml(destRegion.name)}</strong></span>
           <span class="meta-line__sep" aria-hidden="true">·</span>
-          <span>${escapeHtml(destRegion.safetyScore)}</span>
+          <span>${escapeHtml(formatDistance(travelService.computeRouteSummary(initial.originId, initial.destinationId, initial.waypoints).distanceKm, appState.settings.distanceUnit))}</span>
         </div>
 
+        <div class="field__error" id="trip-save-error" role="alert"></div>
         <div class="planner-form__actions">
           <button type="button" class="btn btn--ghost" id="btn-cancel-form">Cancelar</button>
           <button type="submit" class="btn btn--primary">${isEditing ? 'Guardar Alterações' : 'Guardar Viagem'}</button>
@@ -138,12 +152,13 @@ export function renderTripForm(container, { editingTrip, prefillDestinationId, o
   function refreshPreview() {
     const summary = travelService.computeRouteSummary(originEl.value, destEl.value, initial.waypoints || []);
     const dest = getRegionById(destEl.value);
+    if (!dest) return;
     previewEl.innerHTML = `
       <span>Distância estimada: <strong class="tabular-nums">${escapeHtml(formatDistance(summary.distanceKm, appState.settings.distanceUnit))}</strong></span>
       <span class="meta-line__sep" aria-hidden="true">·</span>
       <span>Duração: <strong class="tabular-nums">${summary.estimatedDays} Sóis</strong></span>
       <span class="meta-line__sep" aria-hidden="true">·</span>
-      <span class="${dest.category === 'recommended' ? 'status-text status-text--safe' : 'status-text status-text--danger'}">${escapeHtml(dest.safetyScore)}</span>
+      <span>${escapeHtml(dest.name)} · ${escapeHtml(dest.sourceName || '')}</span>
     `;
   }
 
@@ -184,20 +199,17 @@ export function renderTripForm(container, { editingTrip, prefillDestinationId, o
 
     if (!isValid) return;
 
-    const summary = travelService.computeRouteSummary(data.originId, data.destinationId, data.waypoints);
-    if (summary.hasRiskZones && data.riskTolerance !== 'elevado') {
-      const hasCritical = summary.riskRegions.some((r) => r.riskLevel === 'critico');
-      const confirmed = await showPriorityConfirmSwal({
-        priority: hasCritical ? 'P1' : 'P2',
-        title: hasCritical ? 'Emergência: Zona Proibida na Rota' : 'Alerta de Rota em Zona de Risco',
-        text: `A missão atravessa ${summary.riskRegions.map((r) => r.name).join(', ')} com tolerância definida como "${data.riskTolerance}". Deseja confirmar o planeamento mesmo assim?`,
-        confirmText: 'Confirmar Mesmo Assim',
-        cancelText: 'Rever Destino',
-      });
-      if (!confirmed) return;
+    const submitButton = formEl.querySelector('button[type="submit"]');
+    const saveError = container.querySelector('#trip-save-error');
+    submitButton.disabled = true;
+    try {
+      const saved = await travelService.saveTrip(data, editingTrip?.id || null);
+      onSaved?.(saved);
+    } catch (error) {
+      saveError.textContent = error.message;
+      showToast({ title: 'Não foi possível guardar a missão', message: error.message, variant: 'warn' });
+    } finally {
+      submitButton.disabled = false;
     }
-
-    const saved = travelService.saveTrip(data, editingTrip?.id || null);
-    onSaved?.(saved);
   });
 }

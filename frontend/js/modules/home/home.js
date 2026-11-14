@@ -72,7 +72,7 @@ export function createHomeView({ navigateTo }) {
           <span class="mars-dest-card__val tabular-nums">${escapeHtml(distLabel)}</span>
         </div>
         <div class="mars-dest-card__row">
-          <span class="mars-dest-card__key">Temperatura</span>
+          <span class="mars-dest-card__key">Fonte</span>
           <span class="mars-dest-card__val">${escapeHtml(region.sourceName || 'Fonte não indicada')}</span>
         </div>
         <div class="mars-dest-card__row">
@@ -257,7 +257,7 @@ export function createHomeView({ navigateTo }) {
           </div>
 
           <div class="home-center-overlay" id="home-callouts-overlay">
-            <button type="button" class="globe-callout globe-callout--safe" id="callout-safe" style="display: none;">
+            <button type="button" class="globe-callout globe-callout--region" id="callout-safe" style="display: none;">
               <span class="globe-callout__dot" aria-hidden="true"></span>
               <span data-label>Local recomendado</span>
             </button>
@@ -284,8 +284,7 @@ export function createHomeView({ navigateTo }) {
         globe.setOnRegionSelect((regionId) => {
           appState.selectedRegionId = regionId;
           renderDestinationCard(container);
-          const reg = getRegionById(regionId);
-          if (reg) appState.selectedRegionId = reg.id;
+          if (getRegionById(regionId)) appState.selectedRegionId = regionId;
         });
         globe.setOnFrame(() => updateProjectedCallouts(container));
       }

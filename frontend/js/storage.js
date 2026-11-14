@@ -2,13 +2,12 @@ const STORAGE_PREFIX = 'marte_explorer_v1_';
 
 export const STORAGE_KEYS = {
   SETTINGS: `${STORAGE_PREFIX}settings`,
-  ACTIVITY: `${STORAGE_PREFIX}activity_log`,
 };
 
 export const storage = {
   removeLegacyDemoData() {
     try {
-      ['trips', 'chat_history', 'alerts_state'].forEach((key) => {
+      ['trips', 'chat_history', 'alerts_state', 'activity_log'].forEach((key) => {
         window.localStorage.removeItem(`${STORAGE_PREFIX}${key}`);
       });
     } catch (error) {

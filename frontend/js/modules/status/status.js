@@ -4,23 +4,15 @@ import {
   getAlertsSortedByPriority,
   getHighestPriorityAlert,
   getRegionById,
-  notifyIfEnabled,
   PRIORITY_META,
 } from '../../core/state.js';
 import { getMarsThumbnailDataUrl } from '../home/mars-globe.js';
-import {
-  formatCoordinates,
-  formatDistance,
-  formatSpeed,
-  formatTemperature,
-} from '../../utils/formatters.js';
-import { clamp, escapeHtml } from '../../utils/helpers.js';
+import { formatCoordinates, formatDistance } from '../../utils/formatters.js';
+import { escapeHtml, calculateMarsDistanceKm } from '../../utils/helpers.js';
 import { showEmergencyCenterSwal, showEmergencySweetAlert } from '../../utils/sweetalerts.js';
+import { showToast } from '../../core/events.js';
 
 export function createStatusView({ navigateTo }) {
-  let simInterval = null;
-  let simOffsetPct = 0;
-  let alertCategoryFilter = 'all';
   let showAlertsDrawer = false;
 
   function getMonitoredTrip() {
@@ -32,7 +24,6 @@ export function createStatusView({ navigateTo }) {
   function renderTelemetry(container) {
     const trip = getMonitoredTrip();
     const distUnit = appState.settings.distanceUnit;
-    const tempUnit = appState.settings.temperatureUnit;
 
     const mainCardEl = container.querySelector('#status-telemetry-card');
     const arrivalCardEl = container.querySelector('#status-arrival-card');
@@ -40,7 +31,7 @@ export function createStatusView({ navigateTo }) {
     if (!mainCardEl || !arrivalCardEl || !extraGridEl) return;
 
     if (!trip) {
-      mainCardEl.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">Sem missões registadas.</div>`;
+      mainCardEl.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">${appState.backendUser ? 'O servidor não tem missões para esta conta.' : 'Inicie sessão para consultar as suas missões.'}</div>`;
       arrivalCardEl.innerHTML = '';
       extraGridEl.innerHTML = '';
       return;
@@ -48,18 +39,20 @@ export function createStatusView({ navigateTo }) {
 
     const origin = getRegionById(trip.originId);
     const dest = getRegionById(trip.destinationId);
+    if (!origin || !dest) {
+      mainCardEl.innerHTML = '<div class="empty-state">A origem ou o destino já não existe no catálogo do servidor.</div>';
+      arrivalCardEl.innerHTML = '';
+      extraGridEl.innerHTML = '';
+      return;
+    }
 
-    const effectiveProgress =
-      trip.status === 'completed' ? 100 : clamp((trip.progress || 0) + simOffsetPct, 0, 99);
-    const fraction = effectiveProgress / 100;
-
-    const remainingDistKm = Math.max(0, Math.round((trip.distanceKm || 1200) * (1 - fraction)));
-    const totalDays = trip.estimatedDays || 14;
-    const remainingDays = Math.max(0, Math.ceil(totalDays * (1 - fraction)));
-    const currentLat = origin.lat + (dest.lat - origin.lat) * fraction;
-    const currentLon = origin.lon + (dest.lon - origin.lon) * fraction;
-    const currentTempC = Math.round(origin.tempCelsius + (dest.tempCelsius - origin.tempCelsius) * fraction);
-    const currentSpeed = trip.status === 'completed' ? 0 : trip.speedKmH || 82;
+    const heartbeat = appState.latestHeartbeat;
+    const effectiveProgress = trip.status === 'completed'
+      ? 100
+      : Number(trip.progress || 0);
+    const remainingDistKm = heartbeat
+      ? calculateMarsDistanceKm(heartbeat.latitude, heartbeat.longitude, dest.lat, dest.lon)
+      : null;
     const missionStatusText =
       trip.status === 'completed'
         ? 'Chegada Concluída'
@@ -71,11 +64,10 @@ export function createStatusView({ navigateTo }) {
     const circ = 2 * Math.PI * radius;
     const offset = circ - (effectiveProgress / 100) * circ;
     const thumbUrl = getMarsThumbnailDataUrl();
-    const isDestSafe = dest.category === 'recommended';
 
     mainCardEl.innerHTML = `
       <div class="status-gauge-block">
-        <div class="status-rocket-ring" aria-label="Progresso simulado da missão: ${effectiveProgress}%">
+        <div class="status-rocket-ring" aria-label="Progresso da missão recebido do servidor: ${effectiveProgress}%">
           <svg viewBox="0 0 112 112">
             <circle class="status-rocket-ring__bg" cx="56" cy="56" r="${radius}"></circle>
             <circle
@@ -98,8 +90,8 @@ export function createStatusView({ navigateTo }) {
 
         <div>
           <div class="status-days__kicker">Tempo Estimado de Viagem</div>
-          <div class="status-days__number tabular-nums">${remainingDays} dias</div>
-          <div class="status-days__sub">restantes da missão · ${effectiveProgress}% concluído</div>
+          <div class="status-days__number tabular-nums">${trip.estimatedDays} Sóis</div>
+          <div class="status-days__sub">estimativa guardada no servidor · progresso ${effectiveProgress}%</div>
         </div>
       </div>
 
@@ -110,7 +102,7 @@ export function createStatusView({ navigateTo }) {
           </svg>
           <div>
             <div class="status-metric-item__label">Distância até Destino</div>
-            <div class="status-metric-item__val tabular-nums">${escapeHtml(formatDistance(remainingDistKm, distUnit))}</div>
+            <div class="status-metric-item__val tabular-nums">${heartbeat ? escapeHtml(formatDistance(remainingDistKm, distUnit)) : 'Sem posição comunicada'}</div>
           </div>
         </div>
 
@@ -119,8 +111,8 @@ export function createStatusView({ navigateTo }) {
             <circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/>
           </svg>
           <div>
-            <div class="status-metric-item__label">Posição Actual &amp; Velocidade</div>
-            <div class="status-metric-item__val tabular-nums">${escapeHtml(formatCoordinates(currentLat, currentLon))} · ${escapeHtml(formatSpeed(currentSpeed, distUnit))}</div>
+            <div class="status-metric-item__label">Última posição comunicada</div>
+            <div class="status-metric-item__val tabular-nums">${heartbeat ? escapeHtml(formatCoordinates(heartbeat.latitude, heartbeat.longitude)) : 'Sem heartbeat recebido'}</div>
           </div>
         </div>
 
@@ -129,8 +121,8 @@ export function createStatusView({ navigateTo }) {
             <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
           </svg>
           <div>
-            <div class="status-metric-item__label">Temperatura Externa</div>
-            <div class="status-metric-item__val tabular-nums">${escapeHtml(formatTemperature(currentTempC, tempUnit))}</div>
+            <div class="status-metric-item__label">Fonte do destino</div>
+            <div class="status-metric-item__val">${escapeHtml(dest.sourceName || 'Não indicada')}</div>
           </div>
         </div>
       </div>
@@ -141,13 +133,13 @@ export function createStatusView({ navigateTo }) {
 
       <div class="arrival-row">
         <div class="arrival-row__left">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${isDestSafe ? '#78E62E' : '#FF2929'}" stroke-width="2" aria-hidden="true">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A65A" stroke-width="2" aria-hidden="true">
             <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
           </svg>
           <div>
             <div style="font-family: var(--font-display); font-weight: 600; letter-spacing: 0.08em;">${escapeHtml(dest.name)}</div>
             <div class="panel__meta" style="font-size: 0.8rem;">
-              ${isDestSafe ? 'Região recomendada para chegada' : 'Região com alerta operacional'}
+              ${escapeHtml(dest.sourceName || 'Região do catálogo do servidor')}
             </div>
           </div>
         </div>
@@ -186,8 +178,8 @@ export function createStatusView({ navigateTo }) {
         <div class="telemetry-mini-card__val">${escapeHtml(origin.name)}</div>
       </div>
       <div class="telemetry-mini-card">
-        <div class="telemetry-mini-card__label">Duração Total Prevista</div>
-        <div class="telemetry-mini-card__val tabular-nums">${totalDays} Sóis</div>
+        <div class="telemetry-mini-card__label">Duração Estimada</div>
+        <div class="telemetry-mini-card__val tabular-nums">${trip.estimatedDays} Sóis</div>
       </div>
       <div class="telemetry-mini-card">
         <div class="telemetry-mini-card__label">Tripulação</div>
@@ -201,7 +193,13 @@ export function createStatusView({ navigateTo }) {
     if (!alertCard) return;
 
     const topAlert = getHighestPriorityAlert();
-    if (!topAlert) return;
+    if (!topAlert) {
+      alertCard.disabled = true;
+      alertCard.innerHTML = '<div class="alert-hero-card__title">Sem alertas ativos fornecidos pelo servidor.</div>';
+      alertCard.onclick = null;
+      return;
+    }
+    alertCard.disabled = false;
     const pMeta = PRIORITY_META[topAlert.priority || 'P2'] || PRIORITY_META.P2;
 
     alertCard.innerHTML = `
@@ -247,11 +245,9 @@ export function createStatusView({ navigateTo }) {
     if (!gridEl) return;
 
     const sorted = getAlertsSortedByPriority(appState.alerts);
-    const filtered = sorted.filter((a) =>
-      alertCategoryFilter === 'all' ? true : a.category === alertCategoryFilter
-    );
+    const filtered = sorted;
 
-    gridEl.innerHTML = filtered
+    gridEl.innerHTML = filtered.length ? filtered
       .map((alert) => {
         const region = getRegionById(alert.regionId);
         const pMeta = PRIORITY_META[alert.priority || 'P2'] || PRIORITY_META.P2;
@@ -262,7 +258,7 @@ export function createStatusView({ navigateTo }) {
               <span class="meta-line">
                 <span class="tabular-nums" style="color: ${pMeta.color}; font-weight: 700;">${escapeHtml(pMeta.label)}</span>
                 <span class="meta-line__sep" aria-hidden="true">·</span>
-                <span>${escapeHtml(region.name)}</span>
+                <span>${escapeHtml(region?.name || 'Sem região associada')}</span>
               </span>
               <span class="status-text ${
                 alert.acknowledged
@@ -292,13 +288,19 @@ export function createStatusView({ navigateTo }) {
           </article>
         `;
       })
-      .join('');
+      .join('') : '<div class="empty-state">Não há alertas fornecidos pelo servidor.</div>';
 
     gridEl.querySelectorAll('[data-ack-alert]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        acknowledgeAlert(btn.dataset.ackAlert);
-        renderAlertsBoard(container);
-        renderTopAlert(container);
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await acknowledgeAlert(btn.dataset.ackAlert);
+          renderAlertsBoard(container);
+          renderTopAlert(container);
+        } catch (error) {
+          showToast({ title: 'Não foi possível atualizar o alerta', message: error.message, variant: 'warn' });
+          btn.disabled = false;
+        }
       });
     });
 
@@ -330,8 +332,6 @@ export function createStatusView({ navigateTo }) {
 
   return {
     mount(container) {
-      simOffsetPct = 0;
-
       container.innerHTML = `
         <section class="view-section status-stage" aria-label="Estado Atual da Missão">
           <div class="status-top-row">
@@ -340,12 +340,12 @@ export function createStatusView({ navigateTo }) {
                 ESTADO
                 <span class="status-hero-title__red">ATUAL</span>
               </h1>
-              <p class="status-hero-sub">Acompanhe o progresso da sua missão com dados simulados de demonstração.</p>
-              <p class="status-sim-note">Modo Demonstração Simulado · Sem telemetria real ligada</p>
+              <p class="status-hero-sub">Missões, alertas e posições recebidos do backend.</p>
+              <p class="status-sim-note">A posição é atualizada apenas quando uma coordenada é enviada manualmente.</p>
 
               <div style="display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3);">
                 <label for="status-trip-select" class="sr-only">Selecionar missão monitorizada</label>
-                <select id="status-trip-select" class="field__control" style="width: auto; min-width: 230px; min-height: 36px; font-size: 0.84rem;">
+                <select id="status-trip-select" class="field__control" style="width: auto; min-width: 230px; min-height: 36px; font-size: 0.84rem;" ${appState.trips.length ? '' : 'disabled'}>
                   ${appState.trips
                     .map(
                       (trip) => `
@@ -358,10 +358,6 @@ export function createStatusView({ navigateTo }) {
                     )
                     .join('')}
                 </select>
-                <button type="button" class="btn btn--secondary btn--sm" id="btn-advance-sim">+5% Simulação</button>
-                <button type="button" class="btn btn--ghost btn--sm" id="btn-toggle-sim">
-                  ${appState.simulationPaused ? 'Retomar' : 'Pausar'}
-                </button>
                 <button type="button" class="btn btn--danger btn--sm" id="btn-status-emergencies">
                   Emergências &amp; Prioridades
                 </button>
@@ -384,15 +380,7 @@ export function createStatusView({ navigateTo }) {
             <div class="panel__header">
               <div>
                 <h2 class="panel__title">Sistema de Alertas de Segurança (Ordenado por Prioridade)</h2>
-                <p class="panel__meta">Zonas proibidas, atividade vulcânica, instabilidade, condições ambientais e rotas.</p>
-              </div>
-              <div class="segmented" role="group" aria-label="Filtrar categoria de alerta">
-                <button type="button" class="segmented__btn is-active" data-alert-filter="all">Todos</button>
-                <button type="button" class="segmented__btn" data-alert-filter="proibida">Proibidas</button>
-                <button type="button" class="segmented__btn" data-alert-filter="vulcanica">Vulcânica</button>
-                <button type="button" class="segmented__btn" data-alert-filter="instavel">Instáveis</button>
-                <button type="button" class="segmented__btn" data-alert-filter="ambiental">Ambientais</button>
-                <button type="button" class="segmented__btn" data-alert-filter="rota">Rotas</button>
+                <p class="panel__meta">Alertas ativos fornecidos pelo backend.</p>
               </div>
             </div>
             <div class="alerts-board__grid" id="status-alerts-grid"></div>
@@ -406,18 +394,7 @@ export function createStatusView({ navigateTo }) {
 
       container.querySelector('#status-trip-select')?.addEventListener('change', (e) => {
         appState.selectedStatusTripId = e.target.value;
-        simOffsetPct = 0;
         renderTelemetry(container);
-      });
-
-      container.querySelector('#btn-advance-sim')?.addEventListener('click', () => {
-        simOffsetPct = (simOffsetPct + 5) % 45;
-        renderTelemetry(container);
-        notifyIfEnabled('missionMilestones', {
-          title: 'Progresso Simulado Atualizado',
-          message: 'Os indicadores da missão avançaram +5%.',
-          variant: 'safe',
-        });
       });
 
       container.querySelector('#btn-status-emergencies')?.addEventListener('click', () => {
@@ -434,35 +411,8 @@ export function createStatusView({ navigateTo }) {
         });
       });
 
-      const toggleBtn = container.querySelector('#btn-toggle-sim');
-      toggleBtn?.addEventListener('click', () => {
-        appState.simulationPaused = !appState.simulationPaused;
-        toggleBtn.textContent = appState.simulationPaused ? 'Retomar' : 'Pausar';
-      });
-
-      container.querySelectorAll('[data-alert-filter]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          alertCategoryFilter = btn.dataset.alertFilter;
-          container.querySelectorAll('[data-alert-filter]').forEach((b) => {
-            b.classList.toggle('is-active', b.dataset.alertFilter === alertCategoryFilter);
-          });
-          renderAlertsBoard(container);
-        });
-      });
-
-      simInterval = window.setInterval(() => {
-        if (!appState.simulationPaused && !appState.settings.reducedMotion) {
-          simOffsetPct = (simOffsetPct + 1) % 35;
-          renderTelemetry(container);
-        }
-      }, 6000);
     },
 
-    unmount() {
-      if (simInterval) {
-        window.clearInterval(simInterval);
-        simInterval = null;
-      }
-    },
+    unmount() {},
   };
 }

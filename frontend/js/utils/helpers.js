@@ -43,7 +43,10 @@ export function calculateMarsDistanceKm(lat1, lon1, lat2, lon2) {
 /**
  * Computes total route distance across an ordered array of regions.
  */
-export function calculateRouteMetrics(points, speedKmPerHour = 85) {
+export function calculateRouteMetrics(points, speedKmPerHour) {
+  if (!Number.isFinite(speedKmPerHour) || speedKmPerHour <= 0) {
+    throw new RangeError('Route speed must be supplied by the backend catalog.');
+  }
   if (!Array.isArray(points) || points.length < 2) {
     return { distanceKm: 0, durationDays: 0, durationHours: 0 };
   }
