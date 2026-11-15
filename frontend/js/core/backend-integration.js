@@ -6,6 +6,10 @@ import { eventBus, showToast } from './events.js';
 import { calculateMarsDistanceKm } from '../utils/helpers.js';
 
 let echo = null;
+const HEARTBEAT_INTERVAL_MS = 60_000;
+let periodicHeartbeatTimer = null;
+let periodicHeartbeatRunId = 0;
+let periodicHeartbeatInProgress = false;
 
 function emitConnectionChange() {
   eventBus.emit('backend:changed', {
@@ -151,6 +155,103 @@ function stopRealtime() {
   appState.reverbStatus = 'disconnected';
 }
 
+function getDeviceCoordinates() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Este navegador não disponibiliza a localização do dispositivo.'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => resolve({
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      }),
+      (error) => {
+        const messages = {
+          1: 'Permita o acesso à localização do dispositivo para iniciar o envio automático.',
+          2: 'Não foi possível determinar a localização do dispositivo.',
+          3: 'A localização do dispositivo demorou demasiado tempo a responder.',
+        };
+        const locationError = new Error(messages[error.code] || 'Falha ao obter a localização do dispositivo.');
+        locationError.code = error.code;
+        reject(locationError);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 },
+    );
+  });
+}
+
+async function sendPeriodicHeartbeat(runId) {
+  if (
+    periodicHeartbeatInProgress
+    || runId !== periodicHeartbeatRunId
+    || !appState.periodicHeartbeatEnabled
+    || !appState.backendUser
+    || !backendApi.hasToken
+  ) return;
+
+  periodicHeartbeatInProgress = true;
+  try {
+    const coordinates = await getDeviceCoordinates();
+    if (
+      runId !== periodicHeartbeatRunId
+      || !appState.periodicHeartbeatEnabled
+      || !appState.backendUser
+      || !backendApi.hasToken
+    ) return;
+
+    await backendApi.sendHeartbeat(coordinates.latitude, coordinates.longitude);
+    if (runId !== periodicHeartbeatRunId) return;
+
+    const errors = await refreshBackendData();
+    if (errors.length) eventBus.emit('backend:error', errors[0]);
+  } finally {
+    periodicHeartbeatInProgress = false;
+  }
+}
+
+function schedulePeriodicHeartbeat(runId) {
+  periodicHeartbeatTimer = window.setInterval(() => {
+    sendPeriodicHeartbeat(runId).catch((error) => {
+      if (error.code === 1) stopPeriodicHeartbeat();
+      eventBus.emit('backend:error', error);
+    });
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+export async function startPeriodicHeartbeat() {
+  if (!appState.backendUser || !backendApi.hasToken) {
+    throw new Error('Inicie sessão antes de ativar o envio automático.');
+  }
+  if (appState.periodicHeartbeatEnabled) return;
+
+  appState.periodicHeartbeatEnabled = true;
+  const runId = ++periodicHeartbeatRunId;
+  emitConnectionChange();
+
+  try {
+    await sendPeriodicHeartbeat(runId);
+  } catch (error) {
+    stopPeriodicHeartbeat();
+    throw error;
+  }
+
+  if (runId === periodicHeartbeatRunId && appState.periodicHeartbeatEnabled) {
+    schedulePeriodicHeartbeat(runId);
+  }
+}
+
+export function stopPeriodicHeartbeat() {
+  periodicHeartbeatRunId += 1;
+  if (periodicHeartbeatTimer !== null) {
+    window.clearInterval(periodicHeartbeatTimer);
+    periodicHeartbeatTimer = null;
+  }
+  appState.periodicHeartbeatEnabled = false;
+  emitConnectionChange();
+}
+
 export async function refreshBackendData() {
   if (!appState.backendUser) {
     appState.trips = [];
@@ -179,6 +280,7 @@ export async function refreshBackendData() {
   else errors.push(missionsResult.reason);
 
   if (errors.some((error) => error.status === 401)) {
+    stopPeriodicHeartbeat();
     stopRealtime();
     backendApi.clearSession();
     appState.backendUser = null;
@@ -224,6 +326,7 @@ export async function logoutBackend() {
     logoutError = error;
   }
 
+  stopPeriodicHeartbeat();
   stopRealtime();
   appState.backendUser = null;
   appState.apiStatus = 'disconnected';

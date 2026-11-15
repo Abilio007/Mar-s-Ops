@@ -18,7 +18,7 @@ Aplicação web modular em **HTML5**, **CSS3**, **JavaScript ES6+**, **Three.js*
 4. Inicie o Laravel e o Reverb; execute `npm install` e `npm run dev` nesta pasta.
 5. Inicie sessão em **Definições → Conta e ligação**. Alertas `warning`, `alarm` e `clear` chegam pelo canal privado `mars.user.{user_id}`. O mesmo canal atualiza o progresso da rota.
 
-O utilizador pode enviar uma posição marciana manualmente na página de ligação. A aplicação não valida a origem da posição e nunca envia telemetria simulada como heartbeat. O catálogo de regiões é público; missões, alertas, heartbeats e chat requerem autenticação. Se a API falhar, os dados operacionais não são substituídos por dados locais.
+Na página de ligação, o utilizador pode enviar uma posição manualmente ou ativar o envio periódico da localização atual do dispositivo, a cada 60 segundos. A localização do dispositivo é interpretada como coordenada marciana; o navegador pede autorização e o envio automático funciona enquanto a página estiver aberta. O catálogo de regiões é público; missões, alertas, heartbeats e chat requerem autenticação. Se a API falhar, os dados operacionais não são substituídos por dados locais.
 
 ## PWA
 

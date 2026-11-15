@@ -117,6 +117,7 @@ export const appState = {
   reverbStatus: 'disconnected',
   activeBackendRoute: null,
   latestHeartbeat: null,
+  periodicHeartbeatEnabled: false,
   routeProgress: null,
   selectedStatusTripId: null,
 };

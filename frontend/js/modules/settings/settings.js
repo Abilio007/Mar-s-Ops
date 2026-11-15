@@ -13,6 +13,8 @@ import {
   logoutBackend,
   refreshBackendData,
   registerBackend,
+  startPeriodicHeartbeat,
+  stopPeriodicHeartbeat,
 } from '../../core/backend-integration.js';
 
 const SETTINGS_MENU = [
@@ -132,6 +134,16 @@ export function createSettingsView() {
                     </div>
                   </div>
                 </div>
+                <div class="settings-group">
+                  <p class="panel__meta">
+                    O envio automático usa a localização atual do dispositivo, interpretada como coordenadas de Marte.
+                    Requer autorização do navegador e mantém-se ativo enquanto esta página estiver aberta.
+                  </p>
+                  <div class="field__error" id="backend-periodic-heartbeat-error" role="alert"></div>
+                  <button type="button" class="btn btn--secondary btn--sm" id="btn-periodic-heartbeat">
+                    ${appState.periodicHeartbeatEnabled ? 'Parar envio automático' : 'Ativar envio automático (a cada 60 s)'}
+                  </button>
+                </div>
                 <form id="backend-heartbeat-form" class="settings-group" novalidate>
                   <p class="panel__meta">Envie apenas coordenadas marcianas observadas por si. A aplicação não verifica a origem física da posição.</p>
                   <div class="planner-form-grid">
@@ -229,6 +241,32 @@ export function createSettingsView() {
           showToast({ title: 'Sessão terminada localmente', message: error.message, variant: 'warn' });
         }
         renderCategoryContent(container);
+      });
+
+      bodyEl.querySelector('#btn-periodic-heartbeat')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const errorEl = bodyEl.querySelector('#backend-periodic-heartbeat-error');
+        button.disabled = true;
+        errorEl.textContent = '';
+
+        try {
+          if (appState.periodicHeartbeatEnabled) {
+            stopPeriodicHeartbeat();
+            showToast({ title: 'Envio automático da localização parado', variant: 'info' });
+          } else {
+            await startPeriodicHeartbeat();
+            showToast({
+              title: 'Envio automático da localização ativado',
+              message: 'A posição atual foi enviada; os próximos envios serão feitos a cada 60 segundos.',
+              variant: 'safe',
+            });
+          }
+          renderCategoryContent(container);
+        } catch (error) {
+          errorEl.textContent = error.message;
+        } finally {
+          button.disabled = false;
+        }
       });
 
       bodyEl.querySelector('#btn-backend-refresh')?.addEventListener('click', async (event) => {
