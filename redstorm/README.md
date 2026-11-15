@@ -16,3 +16,15 @@ The system counts with an AI to give suppport about the procedures acording to s
 -- nodemon
 -- socket.io
 
+## Instalation
+git clone https://github.com/Abilio007/Mar-s-Ops.git
+cd redstorm
+npm install
+node server.js
+
+## Test
+*open a new cmd*
+cd mar-s-ops
+cd redstorm
+node socketTest.js
+
