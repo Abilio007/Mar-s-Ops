@@ -7,6 +7,11 @@ import { showPriorityConfirmSwal } from '../../utils/sweetalerts.js';
 import { backendApi } from '../../core/backend-api.js';
 import { refreshBackendData } from '../../core/backend-integration.js';
 import { showToast } from '../../core/events.js';
+import {
+  hideMapLocationTooltip,
+  positionMapLocationTooltip,
+  showMapLocationTooltip,
+} from '../map-location-tooltip.js';
 
 export function createTravelMapView({ onCreateTripWithRoute }) {
   let originId = null;
@@ -16,14 +21,89 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
   let apiRoute = null;
   let apiBusy = false;
   let apiError = '';
+  let selectedTooltipRegionId = null;
 
   function updateGlobeRoute() {
     const globe = getSharedMarsGlobe();
     if (!globe) return;
     const ordered = [originId, ...waypoints, destinationId].filter(Boolean);
     globe.setRoute(ordered);
-    globe.setSelectedRegion(destinationId, true);
+    globe.setSelectedRegion(destinationId, false);
+    if (ordered.length > 1) {
+      globe.fitRouteToView(ordered);
+    } else if (destinationId) {
+      globe.setSelectedRegion(destinationId, true);
+    }
   }
+
+  function getRouteRole(regionId) {
+    if (regionId === originId) return 'Partida';
+    if (regionId === destinationId) return 'Destino';
+    const waypointIndex = waypoints.indexOf(regionId);
+    return waypointIndex >= 0 ? `Ponto de passagem ${waypointIndex + 1}` : 'Ainda não incluído na rota';
+  }
+
+  function renderRouteTooltip(regionId = selectedTooltipRegionId) {
+    const globe = getSharedMarsGlobe();
+    const region = getRegionById(regionId);
+    if (!globe || !region) return;
+
+    showMapLocationTooltip(regionId, {
+      routeRole: getRouteRole(regionId),
+      actions: [
+        {
+          label: 'Definir como partida',
+          variant: 'secondary',
+          onSelect: () => {
+            if (regionId === destinationId) {
+              showToast({ title: 'Partida e destino iguais', message: 'Escolha outro local para a partida.', variant: 'warn' });
+              return;
+            }
+            originId = regionId;
+            appState.selectedRegionId = regionId;
+            waypoints = waypoints.filter((waypointId) => waypointId !== originId && waypointId !== destinationId);
+            apiRoute = null;
+            apiError = '';
+            updateGlobeRoute();
+            renderPanel(containerRef);
+          },
+        },
+        {
+          label: 'Definir como destino',
+          variant: 'primary',
+          onSelect: () => {
+            if (regionId === originId) {
+              showToast({ title: 'Partida e destino iguais', message: 'Escolha outro local para o destino.', variant: 'warn' });
+              return;
+            }
+            destinationId = regionId;
+            appState.selectedRegionId = regionId;
+            waypoints = waypoints.filter((waypointId) => waypointId !== originId && waypointId !== destinationId);
+            apiRoute = null;
+            apiError = '';
+            updateGlobeRoute();
+            renderPanel(containerRef);
+          },
+        },
+        {
+          label: 'Adicionar passagem',
+          variant: 'secondary',
+          disabled: regionId === originId || regionId === destinationId || waypoints.includes(regionId),
+          onSelect: () => {
+            if (regionId === originId || regionId === destinationId || waypoints.includes(regionId)) return;
+            waypoints.push(regionId);
+            apiRoute = null;
+            apiError = '';
+            updateGlobeRoute();
+            renderPanel(containerRef);
+          },
+        },
+      ],
+    });
+    positionMapLocationTooltip(globe);
+  }
+
+  let containerRef = null;
 
   function renderPanel(container) {
     const summary = travelService.computeRouteSummary(originId, destinationId, waypoints);
@@ -42,7 +122,7 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
       <div class="panel__header">
         <div>
           <h2 class="panel__title">Planeamento de Rota 3D</h2>
-          <p class="panel__meta">Selecione origem, destino, pontos de passagem e clique no globo para inspecionar regiões.</p>
+          <p class="panel__meta">Clique numa região para a inspecionar e escolher partida, destino ou ponto de passagem no tooltip.</p>
         </div>
       </div>
 
@@ -65,6 +145,27 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
           </select>
         </div>
       </div>
+
+      <ol class="route-itinerary" aria-label="Sequência completa da rota">
+        ${[originId, ...waypoints, destinationId].map((regionId, index, stops) => {
+          const region = getRegionById(regionId);
+          if (!region) return '';
+          const isOrigin = index === 0;
+          const isDestination = index === stops.length - 1;
+          const role = isOrigin ? 'Partida' : isDestination ? 'Destino' : `Passagem ${index}`;
+          const markerRole = isOrigin ? 'origin' : isDestination ? 'destination' : 'waypoint';
+          return `
+            <li class="route-itinerary__stop">
+              <span class="route-itinerary__marker route-itinerary__marker--${markerRole}" aria-hidden="true"></span>
+              <div class="route-itinerary__details">
+                <span class="route-itinerary__role">${role}</span>
+                <strong>${escapeHtml(region.name)}</strong>
+                <span class="route-itinerary__coordinates tabular-nums">${escapeHtml(formatCoordinates(region.lat, region.lon))}</span>
+              </div>
+            </li>
+          `;
+        }).join('')}
+      </ol>
 
       <div style="margin-top: var(--space-4);">
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
@@ -316,10 +417,13 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
         }
       });
     });
+
+    if (selectedTooltipRegionId) renderRouteTooltip();
   }
 
   return {
     mount(container, initialRoute = {}) {
+      containerRef = container;
       destinationId = initialRoute.destinationId || appState.selectedRegionId || appState.regions[0]?.id || null;
       originId = initialRoute.originId
         || appState.regions.find((region) => region.id !== destinationId)?.id
@@ -338,7 +442,15 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
           <div class="route-globe-spacer">
             <div class="route-globe-spacer__hud">
               <span class="panel__meta">Localizações do catálogo do servidor</span>
-              <button type="button" class="btn btn--secondary btn--sm" id="route-globe-reset">Repor Vista</button>
+              <div style="display: flex; gap: 6px;">
+                <button type="button" class="btn btn--secondary btn--sm" id="route-globe-fit">Enquadrar Rota</button>
+                <button type="button" class="btn btn--ghost btn--sm" id="route-globe-reset">Repor Vista</button>
+              </div>
+            </div>
+            <div class="route-legend" aria-label="Legenda da rota">
+              <span class="legend-item"><span class="legend-swatch legend-swatch--origin"></span>Partida</span>
+              <span class="legend-item"><span class="legend-swatch legend-swatch--waypoint"></span>Passagem</span>
+              <span class="legend-item"><span class="legend-swatch legend-swatch--destination"></span>Destino</span>
             </div>
           </div>
 
@@ -349,27 +461,39 @@ export function createTravelMapView({ onCreateTripWithRoute }) {
       const globe = getSharedMarsGlobe();
       if (globe) {
         globe.setOnRegionSelect((regionId) => {
+          selectedTooltipRegionId = regionId;
+          appState.selectedRegionId = regionId;
           if (regionId !== originId) {
             destinationId = regionId;
             waypoints = waypoints.filter((w) => w !== destinationId);
-            updateGlobeRoute();
-            renderPanel(container);
-            const reg = getRegionById(destinationId);
-            if (!reg) return;
           }
+          updateGlobeRoute();
+          renderPanel(container);
+          renderRouteTooltip(regionId);
         });
+        globe.setOnFrame(() => positionMapLocationTooltip(globe));
         updateGlobeRoute();
       }
 
       renderPanel(container);
 
       container.querySelector('#route-globe-reset')?.addEventListener('click', () => getSharedMarsGlobe()?.resetView());
+      container.querySelector('#route-globe-fit')?.addEventListener('click', () => {
+        const globe = getSharedMarsGlobe();
+        const ordered = [originId, ...waypoints, destinationId].filter(Boolean);
+        if (ordered.length > 1) globe?.fitRouteToView(ordered);
+        else globe?.resetView();
+      });
     },
 
     unmount() {
+      hideMapLocationTooltip();
+      selectedTooltipRegionId = null;
+      containerRef = null;
       const globe = getSharedMarsGlobe();
       if (globe) {
         globe.setOnRegionSelect(null);
+        globe.setOnFrame(null);
         globe.setRoute([]);
       }
     },

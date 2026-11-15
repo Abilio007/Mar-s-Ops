@@ -66,6 +66,79 @@
   border-top: 1px solid var(--color-border-subtle);
 }
 
+.earth-trips-panel,
+.earth-trip-card {
+  margin-bottom: var(--space-4);
+}
+
+.earth-trip-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.earth-trips-list {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.earth-trip-route {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  margin: var(--space-4) 0;
+  overflow: visible;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(3, 6, 9, 0.65);
+}
+
+.earth-trip-route__line {
+  fill: none;
+  stroke: var(--color-positive);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.earth-trip-route__point--start {
+  fill: var(--color-accent-orange);
+}
+
+.earth-trip-route__point--end {
+  fill: var(--color-positive);
+}
+
+.earth-trip-route__label {
+  fill: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.earth-trip-steps {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.earth-trip-steps li {
+  padding: var(--space-2);
+  color: var(--color-text-primary);
+}
+
+.earth-trip-steps small {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+}
+
+.earth-trip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
 /* Form Layout */
 .planner-form-grid {
   display: grid;
@@ -120,6 +193,7 @@
   border: 1px solid var(--color-border-subtle);
   font-size: 0.78rem;
   color: var(--color-text-secondary);
+  pointer-events: auto;
 }
 
 .legend-item {
@@ -140,6 +214,78 @@
 
 .legend-swatch--danger {
   background: var(--color-accent-red);
+}
+
+.legend-swatch--origin {
+  background: #e9692c;
+}
+
+.legend-swatch--destination {
+  background: #78e62e;
+}
+
+.legend-swatch--waypoint {
+  background: #f5f5f5;
+}
+
+.route-itinerary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-itinerary__stop {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: rgba(3, 6, 9, 0.65);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.route-itinerary__marker {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+}
+
+.route-itinerary__marker--origin {
+  background: #e9692c;
+}
+
+.route-itinerary__marker--destination {
+  background: #78e62e;
+}
+
+.route-itinerary__marker--waypoint {
+  background: #f5f5f5;
+}
+
+.route-itinerary__details {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.route-itinerary__role {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.route-itinerary__details strong {
+  overflow-wrap: anywhere;
+}
+
+.route-itinerary__coordinates {
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
 }
 
 .waypoints-list {

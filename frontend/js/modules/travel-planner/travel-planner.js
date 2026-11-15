@@ -6,12 +6,13 @@ import { showPriorityConfirmSwal } from '../../utils/sweetalerts.js';
 import { travelService } from './travel-service.js';
 import { renderTripForm } from './travel-form.js';
 import { createTravelMapView } from './travel-map.js';
+import { createEarthTripsView } from './earth-trips.js';
 import { renderMissionCalendar } from './travel-calendar.js';
 import { showToast } from '../../core/events.js';
 
 export function createTravelPlannerView() {
   let categoryFilter = 'all';
-  let activeMapView = null;
+  let activeSubView = null;
   let routeSeed = null;
 
   function getMissionTypeLabel(value) {
@@ -23,9 +24,9 @@ export function createTravelPlannerView() {
   }
 
   function unmountActiveSubView() {
-    if (activeMapView) {
-      activeMapView.unmount();
-      activeMapView = null;
+    if (activeSubView) {
+      activeSubView.unmount();
+      activeSubView = null;
     }
     setMarsStageMode('planner-bg', appState.settings);
   }
@@ -388,7 +389,7 @@ export function createTravelPlannerView() {
     }
 
     if (appState.plannerSubTab === 'routes') {
-      activeMapView = createTravelMapView({
+      activeSubView = createTravelMapView({
         onCreateTripWithRoute: (route) => {
           routeSeed = route;
           appState.editingTripId = null;
@@ -396,7 +397,13 @@ export function createTravelPlannerView() {
           renderCurrentSubTab(rootContainer);
         },
       });
-      activeMapView.mount(stageEl, routeSeed || {});
+      activeSubView.mount(stageEl, routeSeed || {});
+      return;
+    }
+
+    if (appState.plannerSubTab === 'earth') {
+      activeSubView = createEarthTripsView();
+      activeSubView.mount(stageEl);
       return;
     }
 
@@ -441,7 +448,8 @@ export function createTravelPlannerView() {
             </div>
 
             <div class="segmented" role="tablist" aria-label="Submódulos do Planeamento de Viagens">
-              <button type="button" class="segmented__btn" data-planner-tab="list">Gestão de Viagens</button>
+              <button type="button" class="segmented__btn" data-planner-tab="list">Viagens em Marte</button>
+              <button type="button" class="segmented__btn" data-planner-tab="earth">Viagens terrestres</button>
               <button type="button" class="segmented__btn" data-planner-tab="form">Criar / Editar</button>
               <button type="button" class="segmented__btn" data-planner-tab="routes">Rotas 3D</button>
               <button type="button" class="segmented__btn" data-planner-tab="calendar">Calendário</button>

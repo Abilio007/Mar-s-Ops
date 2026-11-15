@@ -17,6 +17,7 @@ class HeartBeat extends Model
         'latitude',
         'longitude',
         'accuracy_m',
+        'coordinate_system',
     ];
 
     public function user(): BelongsTo

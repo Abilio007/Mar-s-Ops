@@ -49,6 +49,7 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          importScripts: ['/push-sw.js'],
           navigateFallbackDenylist: [/^\/api(?:\/|$)/],
           runtimeCaching: [
             {

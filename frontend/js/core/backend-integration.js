@@ -4,6 +4,7 @@ import { backendApi } from './backend-api.js';
 import { appState } from './state.js';
 import { eventBus, showToast } from './events.js';
 import { calculateMarsDistanceKm } from '../utils/helpers.js';
+import { disableBrowserPush } from './push-notifications.js';
 
 let echo = null;
 const HEARTBEAT_INTERVAL_MS = 60_000;
@@ -17,6 +18,10 @@ function emitConnectionChange() {
     apiStatus: appState.apiStatus,
     reverbStatus: appState.reverbStatus,
   });
+}
+
+function emitPeriodicHeartbeatState() {
+  eventBus.emit('heartbeat:state', appState.periodicHeartbeatEnabled);
 }
 
 function nearestRegion(latitude, longitude) {
@@ -166,6 +171,7 @@ function getDeviceCoordinates() {
       ({ coords }) => resolve({
         latitude: coords.latitude,
         longitude: coords.longitude,
+        accuracyM: coords.accuracy,
       }),
       (error) => {
         const messages = {
@@ -182,7 +188,7 @@ function getDeviceCoordinates() {
   });
 }
 
-async function sendPeriodicHeartbeat(runId) {
+async function sendPeriodicHeartbeat(runId, coordinateSystem) {
   if (
     periodicHeartbeatInProgress
     || runId !== periodicHeartbeatRunId
@@ -201,8 +207,17 @@ async function sendPeriodicHeartbeat(runId) {
       || !backendApi.hasToken
     ) return;
 
-    await backendApi.sendHeartbeat(coordinates.latitude, coordinates.longitude);
+    const response = await backendApi.sendHeartbeat(
+      coordinates.latitude,
+      coordinates.longitude,
+      coordinates.accuracyM,
+      coordinateSystem,
+    );
     if (runId !== periodicHeartbeatRunId) return;
+    if (response.trip_progress) {
+      appState.earthTripProgress = response.trip_progress;
+      eventBus.emit('earth:progress', response.trip_progress);
+    }
 
     const errors = await refreshBackendData();
     if (errors.length) eventBus.emit('backend:error', errors[0]);
@@ -211,34 +226,48 @@ async function sendPeriodicHeartbeat(runId) {
   }
 }
 
-function schedulePeriodicHeartbeat(runId) {
+function schedulePeriodicHeartbeat(runId, coordinateSystem) {
   periodicHeartbeatTimer = window.setInterval(() => {
-    sendPeriodicHeartbeat(runId).catch((error) => {
+    sendPeriodicHeartbeat(runId, coordinateSystem).catch(async (error) => {
+      if (error.status === 401) {
+        await refreshBackendData();
+        eventBus.emit('backend:error', error);
+        return;
+      }
       if (error.code === 1) stopPeriodicHeartbeat();
       eventBus.emit('backend:error', error);
     });
   }, HEARTBEAT_INTERVAL_MS);
 }
 
-export async function startPeriodicHeartbeat() {
+export async function startPeriodicHeartbeat(coordinateSystem = 'mars') {
   if (!appState.backendUser || !backendApi.hasToken) {
     throw new Error('Inicie sessão antes de ativar o envio automático.');
   }
-  if (appState.periodicHeartbeatEnabled) return;
+  if (!['mars', 'earth'].includes(coordinateSystem)) {
+    throw new Error('Sistema de coordenadas inválido para o heartbeat.');
+  }
+  if (
+    appState.periodicHeartbeatEnabled
+    && appState.periodicHeartbeatCoordinateSystem === coordinateSystem
+  ) return;
+  if (appState.periodicHeartbeatEnabled) stopPeriodicHeartbeat();
 
   appState.periodicHeartbeatEnabled = true;
+  appState.periodicHeartbeatCoordinateSystem = coordinateSystem;
   const runId = ++periodicHeartbeatRunId;
+  emitPeriodicHeartbeatState();
   emitConnectionChange();
 
   try {
-    await sendPeriodicHeartbeat(runId);
+    await sendPeriodicHeartbeat(runId, coordinateSystem);
   } catch (error) {
     stopPeriodicHeartbeat();
     throw error;
   }
 
   if (runId === periodicHeartbeatRunId && appState.periodicHeartbeatEnabled) {
-    schedulePeriodicHeartbeat(runId);
+    schedulePeriodicHeartbeat(runId, coordinateSystem);
   }
 }
 
@@ -249,6 +278,7 @@ export function stopPeriodicHeartbeat() {
     periodicHeartbeatTimer = null;
   }
   appState.periodicHeartbeatEnabled = false;
+  emitPeriodicHeartbeatState();
   emitConnectionChange();
 }
 
@@ -321,9 +351,14 @@ export async function registerBackend(credentials) {
 export async function logoutBackend() {
   let logoutError;
   try {
-    await backendApi.logout();
+    await disableBrowserPush();
   } catch (error) {
     logoutError = error;
+  }
+  try {
+    await backendApi.logout();
+  } catch (error) {
+    logoutError = logoutError || error;
   }
 
   stopPeriodicHeartbeat();

@@ -65,4 +65,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(MarsMission::class);
     }
+
+    public function earthTrips(): HasMany
+    {
+        return $this->hasMany(EarthTrip::class);
+    }
+
+    public function pushSubscriptions(): HasMany
+    {
+        return $this->hasMany(UserPushSubscription::class);
+    }
 }

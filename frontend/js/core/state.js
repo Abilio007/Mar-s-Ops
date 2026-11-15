@@ -103,7 +103,7 @@ export const appState = {
   selectedRegionId: null,
   selectedTripId: null,
   editingTripId: null,
-  plannerSubTab: 'list', // 'list' | 'form' | 'routes' | 'calendar' | 'details'
+  plannerSubTab: 'list', // 'list' | 'form' | 'routes' | 'calendar' | 'details' | 'earth'
   settingsSubTab: 'general', // 'general' | 'notifications' | 'privacy' | 'about'
   settings: mergeSettings(storage.get(STORAGE_KEYS.SETTINGS)),
   regions: [],
@@ -118,7 +118,9 @@ export const appState = {
   activeBackendRoute: null,
   latestHeartbeat: null,
   periodicHeartbeatEnabled: false,
+  periodicHeartbeatCoordinateSystem: 'mars',
   routeProgress: null,
+  earthTripProgress: null,
   selectedStatusTripId: null,
 };
 

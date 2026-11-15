@@ -5,13 +5,13 @@ use App\Ai\Agents\AIUserAssistent;
 use App\Events\MarsProximityAlert;
 use App\Events\MarsRouteProgressUpdated;
 use App\Models\MarsHazard;
-use App\Models\MarsMission;
 use App\Models\MarsRegion;
 use App\Models\MarsTerrainCell;
 use App\Models\User;
+use App\Services\MarsGeodesy;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
-use App\Services\MarsGeodesy;
+use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
 
@@ -396,6 +396,179 @@ test('AI-generated routes use imported NASA data and can be selected and followe
         ->assertCreated()
         ->assertJsonCount(1, 'data.candidates')
         ->assertJsonPath('data.candidates.0.name', 'already_at_destination');
+});
+
+test('terrestrial trips use configured OSRM road geometry and steps', function () {
+    config([
+        'services.routing.url' => 'http://router.internal:5000',
+        'services.routing.profile' => 'driving',
+    ]);
+    Http::fake([
+        'router.internal:5000/route/v1/driving/*' => Http::response([
+            'code' => 'Ok',
+            'routes' => [[
+                'distance' => 2400.5,
+                'duration' => 720,
+                'geometry' => [
+                    'type' => 'LineString',
+                    'coordinates' => [
+                        [-8.61, 41.15],
+                        [-8.605, 41.151],
+                        [-8.60, 41.155],
+                    ],
+                ],
+                'legs' => [[
+                    'steps' => [
+                        [
+                            'distance' => 150,
+                            'duration' => 45,
+                            'name' => 'Rua Central',
+                            'maneuver' => ['type' => 'depart'],
+                        ],
+                        [
+                            'distance' => 2250,
+                            'duration' => 675,
+                            'name' => 'Avenida Norte',
+                            'maneuver' => ['type' => 'turn', 'modifier' => 'right'],
+                        ],
+                    ],
+                ]],
+            ]],
+        ]),
+    ]);
+    $user = User::factory()->create();
+
+    $response = $this->actingAs($user)->postJson('/api/earth-trips', [
+        'name' => 'Deslocação de teste',
+        'start' => ['latitude' => 41.15, 'longitude' => -8.61],
+        'destination' => ['latitude' => 41.155, 'longitude' => -8.60],
+    ])->assertCreated()
+        ->assertJsonPath('data.distanceMeters', 2401)
+        ->assertJsonPath('data.durationSeconds', 720)
+        ->assertJsonPath('data.geometry.1.latitude', 41.151)
+        ->assertJsonPath('data.steps.1.instruction', 'Vire à direita para Avenida Norte');
+
+    $tripId = $response->json('data.id');
+    $this->getJson('/api/earth-trips')->assertOk()->assertJsonPath('data.0.id', $tripId);
+    Http::assertSent(fn ($request): bool => str_contains($request->url(), '/route/v1/driving/')
+        && $request['steps'] === 'true'
+        && $request['geometries'] === 'geojson');
+
+    $this->actingAs(User::factory()->create())
+        ->deleteJson("/api/earth-trips/{$tripId}")
+        ->assertNotFound();
+});
+
+test('earth heartbeats update only the active terrestrial trip', function () {
+    $user = User::factory()->create();
+    $trip = $user->earthTrips()->create([
+        'name' => 'Rota com curva',
+        'start_latitude' => 0,
+        'start_longitude' => 0,
+        'destination_latitude' => 0,
+        'destination_longitude' => 0.02,
+        'route_geometry' => [
+            ['latitude' => 0, 'longitude' => 0],
+            ['latitude' => 0.01, 'longitude' => 0.01],
+            ['latitude' => 0, 'longitude' => 0.02],
+        ],
+        'route_steps' => [],
+        'distance_m' => 3000,
+        'duration_s' => 1200,
+        'status' => 'active',
+    ]);
+
+    $this->actingAs($user)
+        ->postJson('/api/heartbeats', [
+            'latitude' => 0.01,
+            'longitude' => 0.01,
+            'coordinate_system' => 'earth',
+            'accuracy_m' => 8,
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.coordinate_system', 'earth')
+        ->assertJsonPath('data.accuracy_m', 8)
+        ->assertJsonPath('trip_progress.trip_id', $trip->id)
+        ->assertJsonPath('trip_progress.progress_percent', 50);
+
+    expect($trip->fresh()->progress_percent)->toBe(50);
+    $this->assertDatabaseCount('mars_alerts', 0);
+    $this->getJson('/api/heartbeats/latest')->assertOk()->assertJsonPath('data', null);
+});
+
+test('terrestrial trip creation fails explicitly without an OSRM endpoint', function () {
+    config(['services.routing.url' => null]);
+
+    $this->actingAs(User::factory()->create())
+        ->postJson('/api/earth-trips', [
+            'name' => 'Sem serviço',
+            'start' => ['latitude' => 41.15, 'longitude' => -8.61],
+            'destination' => ['latitude' => 41.16, 'longitude' => -8.60],
+        ])
+        ->assertServiceUnavailable()
+        ->assertJsonPath('message', 'O serviço de rotas terrestres não está configurado.');
+});
+
+test('users can register and remove only their own browser push subscriptions', function () {
+    config([
+        'services.webpush.public_key' => str_repeat('A', 87),
+        'services.webpush.private_key' => str_repeat('B', 43),
+        'services.webpush.subject' => 'mailto:admin@example.test',
+    ]);
+    $endpoint = 'https://fcm.googleapis.com/fcm/send/example-token';
+    $payload = [
+        'endpoint' => $endpoint,
+        'keys' => [
+            'p256dh' => str_repeat('C', 87),
+            'auth' => str_repeat('D', 22),
+        ],
+        'preferences' => [
+            'riskAlerts' => true,
+            'tripUpdates' => false,
+        ],
+    ];
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+
+    $this->getJson('/api/notifications/vapid-public-key')
+        ->assertOk()
+        ->assertJsonPath('data.public_key', str_repeat('A', 87));
+    $this->actingAs($user)->postJson('/api/push-subscriptions', $payload)->assertCreated();
+    expect($user->pushSubscriptions()->first()->preferences)->toBe([
+        'riskAlerts' => true,
+        'tripUpdates' => false,
+    ]);
+
+    $this->actingAs($otherUser)->postJson('/api/push-subscriptions', $payload)->assertConflict();
+    $this->actingAs($otherUser)
+        ->deleteJson('/api/push-subscriptions', ['endpoint' => $endpoint])
+        ->assertOk();
+    $this->assertDatabaseCount('user_push_subscriptions', 1);
+
+    $this->actingAs($user)
+        ->deleteJson('/api/push-subscriptions', ['endpoint' => $endpoint])
+        ->assertOk();
+    $this->assertDatabaseCount('user_push_subscriptions', 0);
+});
+
+test('push subscriptions reject untrusted endpoints and malformed browser keys', function () {
+    $user = User::factory()->create();
+    $payload = [
+        'endpoint' => 'http://example.test/push',
+        'keys' => [
+            'p256dh' => 'not-a-browser-key',
+            'auth' => 'not-a-key',
+        ],
+        'preferences' => [
+            'riskAlerts' => true,
+            'tripUpdates' => true,
+        ],
+    ];
+
+    $this->actingAs($user)
+        ->postJson('/api/push-subscriptions', $payload)
+        ->assertUnprocessable();
+    $this->assertDatabaseCount('user_push_subscriptions', 0);
 });
 
 test('hazard ingestion requires a token and accepts only trusted source URLs', function () {

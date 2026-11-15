@@ -164,6 +164,50 @@ export const backendApi = {
     return request(`/missions/${encodeURIComponent(missionId)}`, { method: 'DELETE' });
   },
 
+  async getEarthTrips() {
+    const response = await request('/earth-trips');
+    return response.data;
+  },
+
+  async createEarthTrip(name, start, destination) {
+    const response = await request('/earth-trips', {
+      method: 'POST',
+      body: { name, start, destination },
+    });
+    return response.data;
+  },
+
+  async updateEarthTripStatus(tripId, status) {
+    const response = await request(`/earth-trips/${encodeURIComponent(tripId)}/status`, {
+      method: 'PATCH',
+      body: { status },
+    });
+    return response.data;
+  },
+
+  async deleteEarthTrip(tripId) {
+    return request(`/earth-trips/${encodeURIComponent(tripId)}`, { method: 'DELETE' });
+  },
+
+  async getPushVapidPublicKey() {
+    const response = await request('/notifications/vapid-public-key', { authenticated: false });
+    return response.data.public_key;
+  },
+
+  async savePushSubscription(subscription, preferences) {
+    return request('/push-subscriptions', {
+      method: 'POST',
+      body: { ...subscription, preferences },
+    });
+  },
+
+  async deletePushSubscription(endpoint) {
+    return request('/push-subscriptions', {
+      method: 'DELETE',
+      body: { endpoint },
+    });
+  },
+
   async updateMissionStatus(missionId, status) {
     const response = await request(`/missions/${encodeURIComponent(missionId)}/status`, {
       method: 'PATCH',
@@ -199,10 +243,15 @@ export const backendApi = {
     return response.data;
   },
 
-  async sendHeartbeat(latitude, longitude) {
+  async sendHeartbeat(latitude, longitude, accuracyM = null, coordinateSystem = 'mars') {
     return request('/heartbeats', {
       method: 'POST',
-      body: { latitude, longitude },
+      body: {
+        latitude,
+        longitude,
+        accuracy_m: accuracyM,
+        coordinate_system: coordinateSystem,
+      },
     });
   },
 

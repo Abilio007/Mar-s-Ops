@@ -339,6 +339,108 @@
   background: rgba(16, 7, 10, 0.82);
 }
 
+.map-location-tooltip-root {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+}
+
+#map-location-tooltip-root[hidden] {
+  display: none;
+}
+
+.map-location-tooltip {
+  position: absolute;
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: var(--space-4);
+  color: var(--color-text-primary);
+  background: rgba(5, 12, 18, 0.96);
+  border: 1px solid rgba(242, 166, 90, 0.72);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.62), 0 0 24px rgba(233, 105, 44, 0.16);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.map-location-tooltip__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.map-location-tooltip__eyebrow {
+  color: #f2a65a;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.map-location-tooltip__title {
+  margin: 4px 0;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.map-location-tooltip__coordinates {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+.map-location-tooltip__close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 50%;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.map-location-tooltip__description {
+  margin-top: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.map-location-tooltip__details {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  font-size: 0.78rem;
+}
+
+.map-location-tooltip__details dt {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.map-location-tooltip__details dd {
+  margin: 2px 0 0;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.map-location-tooltip__details a {
+  color: #f2a65a;
+  text-decoration: underline;
+  pointer-events: auto;
+}
+
+.map-location-tooltip__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
 .panel__header {
   display: flex;
   align-items: center;

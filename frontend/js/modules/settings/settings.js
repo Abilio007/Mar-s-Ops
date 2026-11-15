@@ -3,11 +3,17 @@ import {
   DEFAULT_SETTINGS,
   updateSettings,
 } from '../../core/state.js';
-import { showToast } from '../../core/events.js';
+import { eventBus, showToast } from '../../core/events.js';
 import { storage } from '../../storage.js';
 import { escapeHtml } from '../../utils/helpers.js';
 import { showEmergencyCenterSwal, showPriorityConfirmSwal } from '../../utils/sweetalerts.js';
 import { backendApi } from '../../core/backend-api.js';
+import {
+  disableBrowserPush,
+  enableBrowserPush,
+  getBrowserPushSubscription,
+  updateBrowserPushPreferences,
+} from '../../core/push-notifications.js';
 import {
   loginBackend,
   logoutBackend,
@@ -48,6 +54,7 @@ const SETTINGS_MENU = [
 export function createSettingsView() {
   let activePanelOpen = false;
   let authMode = 'login';
+  let unsubscribeHeartbeatState = null;
 
   function renderCategoryContent(container) {
     const bodyEl = container.querySelector('#settings-content');
@@ -137,7 +144,7 @@ export function createSettingsView() {
                 <div class="settings-group">
                   <p class="panel__meta">
                     O envio automático usa a localização atual do dispositivo, interpretada como coordenadas de Marte.
-                    Requer autorização do navegador e mantém-se ativo enquanto esta página estiver aberta.
+                    Requer autorização do navegador e uma ligação segura (HTTPS ou localhost); mantém-se ativo enquanto esta página estiver aberta.
                   </p>
                   <div class="field__error" id="backend-periodic-heartbeat-error" role="alert"></div>
                   <button type="button" class="btn btn--secondary btn--sm" id="btn-periodic-heartbeat">
@@ -469,6 +476,16 @@ export function createSettingsView() {
           </div>
 
           <div class="settings-group">
+            <p class="panel__meta">Ative notificações do navegador para receber alertas de risco e atualizações de viagens mesmo quando a aplicação não está aberta. O conteúdo enviado ao serviço push não inclui coordenadas nem nomes de destinos.</p>
+            <p class="panel__meta" id="push-notification-status" role="status" aria-live="polite">
+              ${appState.backendUser ? 'A verificar o estado das notificações…' : 'Inicie sessão para configurar notificações push.'}
+            </p>
+            <button type="button" class="btn btn--secondary btn--sm" id="btn-browser-push" ${appState.backendUser ? '' : 'disabled'}>
+              Ativar notificações do navegador
+            </button>
+          </div>
+
+          <div class="settings-group">
             <div class="setting-row">
               <div class="setting-row__info">
                 <div class="setting-row__title">Alertas de Risco</div>
@@ -524,7 +541,59 @@ export function createSettingsView() {
       bodyEl.querySelectorAll('[data-notif]').forEach((input) => {
         input.addEventListener('change', () => {
           updateSettings({ notifications: { [input.dataset.notif]: input.checked } });
+          updateBrowserPushPreferences(appState.settings.notifications).catch((error) => {
+            showToast({
+              title: 'Não foi possível atualizar as preferências push',
+              message: error.message,
+              variant: 'warn',
+            });
+          });
         });
+      });
+
+      const pushButton = bodyEl.querySelector('#btn-browser-push');
+      const pushStatus = bodyEl.querySelector('#push-notification-status');
+      const syncPushButton = (enabled) => {
+        if (pushButton) {
+          pushButton.dataset.enabled = enabled ? 'true' : 'false';
+          pushButton.textContent = enabled
+            ? 'Desativar notificações do navegador'
+            : 'Ativar notificações do navegador';
+        }
+      };
+
+      if (appState.backendUser) {
+        getBrowserPushSubscription()
+          .then((subscription) => {
+            syncPushButton(Boolean(subscription));
+            if (pushStatus && subscription) pushStatus.textContent = 'Notificações push ativadas neste navegador.';
+            else if (pushStatus) pushStatus.textContent = 'Notificações push desativadas neste navegador.';
+          })
+          .catch((error) => {
+            if (pushStatus) pushStatus.textContent = error.message;
+          });
+      }
+
+      pushButton?.addEventListener('click', async () => {
+        pushButton.disabled = true;
+        try {
+          if (pushButton.dataset.enabled === 'true') {
+            await disableBrowserPush();
+            syncPushButton(false);
+            if (pushStatus) pushStatus.textContent = 'Notificações push desativadas neste navegador.';
+            showToast({ title: 'Notificações do navegador desativadas', variant: 'safe' });
+          } else {
+            await enableBrowserPush(appState.settings.notifications);
+            syncPushButton(true);
+            if (pushStatus) pushStatus.textContent = 'Notificações push ativadas neste navegador.';
+            showToast({ title: 'Notificações do navegador ativadas', variant: 'safe' });
+          }
+        } catch (error) {
+          if (pushStatus) pushStatus.textContent = error.message;
+          showToast({ title: 'Não foi possível configurar notificações push', message: error.message, variant: 'warn' });
+        } finally {
+          pushButton.disabled = false;
+        }
       });
 
       bodyEl.querySelector('#btn-show-alerts')?.addEventListener('click', () => {
@@ -623,6 +692,15 @@ export function createSettingsView() {
 
   return {
     mount(container) {
+      unsubscribeHeartbeatState = eventBus.on('heartbeat:state', (enabled) => {
+        const button = container.querySelector('#btn-periodic-heartbeat');
+        if (button) {
+          button.textContent = enabled
+            ? 'Parar envio automático'
+            : 'Ativar envio automático (a cada 60 s)';
+        }
+      });
+
       container.innerHTML = `
         <section class="view-section settings-stage" aria-label="Definições">
           <h1 class="settings-hero-title">DEFINIÇÕES</h1>
@@ -665,6 +743,9 @@ export function createSettingsView() {
       renderCategoryContent(container);
     },
 
-    unmount() {},
+    unmount() {
+      unsubscribeHeartbeatState?.();
+      unsubscribeHeartbeatState = null;
+    },
   };
 }

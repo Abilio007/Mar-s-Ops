@@ -6,6 +6,7 @@ use App\Models\MarsMission;
 use App\Models\MarsRegion;
 use App\Models\User;
 use App\Services\MarsGeodesy;
+use App\Services\PushNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -23,7 +24,7 @@ class MarsMissionController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, PushNotificationService $pushNotifications): JsonResponse
     {
         $validated = $this->validateMission($request);
         $metrics = $this->routeMetrics($validated);
@@ -35,11 +36,17 @@ class MarsMissionController extends Controller
             'progress' => 0,
             'checklist' => [],
         ]);
+        $pushNotifications->send(
+            $request->user(),
+            'tripUpdates',
+            'Missão criada',
+            'Uma viagem foi adicionada ao planeamento.',
+        );
 
         return response()->json(['data' => $this->serialize($mission)], 201);
     }
 
-    public function update(Request $request, string $missionId): JsonResponse
+    public function update(Request $request, string $missionId, PushNotificationService $pushNotifications): JsonResponse
     {
         $mission = $this->ownedMission($request->user(), $missionId);
         $validated = $this->validateMission($request);
@@ -47,18 +54,34 @@ class MarsMissionController extends Controller
             ...$this->toModelAttributes($validated),
             ...$this->routeMetrics($validated),
         ]);
+        $pushNotifications->send(
+            $request->user(),
+            'tripUpdates',
+            'Missão atualizada',
+            'Uma viagem foi atualizada.',
+        );
 
         return response()->json(['data' => $this->serialize($mission->refresh())]);
     }
 
-    public function destroy(Request $request, string $missionId): JsonResponse
+    public function destroy(Request $request, string $missionId, PushNotificationService $pushNotifications): JsonResponse
     {
         $this->ownedMission($request->user(), $missionId)->delete();
+        $pushNotifications->send(
+            $request->user(),
+            'tripUpdates',
+            'Missão removida',
+            'Uma viagem foi removida do planeamento.',
+        );
 
         return response()->json(['message' => 'Mission deleted.']);
     }
 
-    public function updateStatus(Request $request, string $missionId): JsonResponse
+    public function updateStatus(
+        Request $request,
+        string $missionId,
+        PushNotificationService $pushNotifications,
+    ): JsonResponse
     {
         $mission = $this->ownedMission($request->user(), $missionId);
         $validated = $request->validate([
@@ -68,6 +91,14 @@ class MarsMissionController extends Controller
             'status' => $validated['status'],
             'progress' => $validated['status'] === 'completed' ? 100 : $mission->progress,
         ])->save();
+        if ($mission->wasChanged('status')) {
+            $pushNotifications->send(
+                $request->user(),
+                'tripUpdates',
+                'Estado da missão atualizado',
+                'O estado de uma viagem foi alterado.',
+            );
+        }
 
         return response()->json(['data' => $this->serialize($mission->refresh())]);
     }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\EarthTripProgressService;
 use App\Services\MarsAlertService;
 use App\Services\MarsMissionProgressService;
 use App\Services\MarsRouteProgressService;
@@ -16,6 +17,7 @@ class HeartBeatController extends Controller
     {
         $heartBeats = $request->user()
             ->heartBeats()
+            ->where('coordinate_system', 'mars')
             ->latest()
             ->limit(100)
             ->get();
@@ -25,7 +27,10 @@ class HeartBeatController extends Controller
 
     public function latest(Request $request): JsonResponse
     {
-        $heartBeat = $request->user()->heartBeats()->latest()->first();
+        $heartBeat = $request->user()->heartBeats()
+            ->where('coordinate_system', 'mars')
+            ->latest()
+            ->first();
 
         return response()->json(['data' => $heartBeat]);
     }
@@ -35,12 +40,15 @@ class HeartBeatController extends Controller
         MarsAlertService $marsAlertService,
         MarsMissionProgressService $marsMissionProgressService,
         MarsRouteProgressService $marsRouteProgressService,
+        EarthTripProgressService $earthTripProgressService,
     ): JsonResponse {
         $validated = $request->validate([
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
             'accuracy_m' => ['nullable', 'numeric', 'min:0', 'max:100000'],
+            'coordinate_system' => ['sometimes', 'string', 'in:mars,earth'],
         ]);
+        $coordinateSystem = $validated['coordinate_system'] ?? 'mars';
 
         /** @var User $user */
         $user = $request->user();
@@ -49,7 +57,21 @@ class HeartBeatController extends Controller
             'id' => $uuid,
             'uuid' => $uuid,
             ...$validated,
+            'coordinate_system' => $coordinateSystem,
         ]);
+
+        if ($coordinateSystem === 'earth') {
+            $tripProgress = $earthTripProgressService->update($user, [
+                'latitude' => $heartBeat->latitude,
+                'longitude' => $heartBeat->longitude,
+            ]);
+
+            return response()->json([
+                'data' => $heartBeat,
+                'alerts' => [],
+                'trip_progress' => $tripProgress,
+            ], 201);
+        }
 
         $alerts = $marsAlertService->evaluate($user, $heartBeat);
         $marsMissionProgressService->update($user, $heartBeat->latitude, $heartBeat->longitude);

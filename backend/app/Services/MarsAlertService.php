@@ -6,6 +6,7 @@ use App\Events\MarsProximityAlert;
 use App\Models\HeartBeat;
 use App\Models\MarsHazard;
 use App\Models\User;
+use App\Services\PushNotificationService;
 
 class MarsAlertService
 {
@@ -14,6 +15,8 @@ class MarsAlertService
     private const ALARM_DISTANCE_KM = 15;
 
     private const DISTANCE_TOLERANCE_KM = 0.000001;
+
+    public function __construct(private PushNotificationService $pushNotifications) {}
 
     /**
      * @return array<int, array<string, mixed>>
@@ -61,6 +64,12 @@ class MarsAlertService
 
             if ($shouldBroadcast) {
                 event(new MarsProximityAlert($alert));
+                $this->pushNotifications->send(
+                    $user,
+                    'riskAlerts',
+                    'Novo alerta de risco',
+                    'Consulte os alertas na aplicação.',
+                );
             }
 
             $activeAlerts[] = $alert->toArray();
@@ -78,6 +87,12 @@ class MarsAlertService
                 'last_notified_at' => now(),
             ])->save();
             event(new MarsProximityAlert($alert));
+            $this->pushNotifications->send(
+                $user,
+                'riskAlerts',
+                'Alerta de risco atualizado',
+                'Consulte os alertas na aplicação.',
+            );
         }
 
         return $activeAlerts;

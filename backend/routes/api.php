@@ -1,15 +1,17 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\EarthTripController;
 use App\Http\Controllers\HeartBeatController;
-use App\Http\Controllers\MarsAssistantController;
 use App\Http\Controllers\MarsAlertController;
+use App\Http\Controllers\MarsAssistantController;
 use App\Http\Controllers\MarsDataController;
 use App\Http\Controllers\MarsHazardController;
 use App\Http\Controllers\MarsMissionController;
 use App\Http\Controllers\MarsRegionController;
 use App\Http\Controllers\MarsRouteController;
 use App\Http\Controllers\MarsTerrainController;
+use App\Http\Controllers\PushSubscriptionController;
 use App\Http\Middleware\MarsDataIngestToken;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Route;
@@ -29,12 +31,16 @@ Route::prefix('auth')->group(function (): void {
 Route::get('/data/sources', [MarsDataController::class, 'sources']);
 Route::get('/data/catalog', [MarsDataController::class, 'catalog']);
 Route::get('/data/regions', [MarsRegionController::class, 'index']);
+Route::get('/notifications/vapid-public-key', [PushSubscriptionController::class, 'vapidPublicKey']);
 Route::post('/data/hazards', [MarsHazardController::class, 'ingest'])
     ->middleware([MarsDataIngestToken::class, 'throttle:10,1']);
 Route::post('/data/terrain', [MarsTerrainController::class, 'ingest'])
     ->middleware([MarsDataIngestToken::class, 'throttle:10,1']);
 
 Route::middleware('auth:sanctum')->group(function (): void {
+    Route::post('/push-subscriptions', [PushSubscriptionController::class, 'store'])->middleware('throttle:10,1');
+    Route::delete('/push-subscriptions', [PushSubscriptionController::class, 'destroy'])->middleware('throttle:10,1');
+
     Route::get('/assistant/conversation', [MarsAssistantController::class, 'history']);
     Route::post('/assistant/chat', [MarsAssistantController::class, 'chat'])->middleware('throttle:10,1');
     Route::delete('/assistant/conversations/{conversationId}', [MarsAssistantController::class, 'destroyConversation'])
@@ -54,6 +60,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/heartbeats', [HeartBeatController::class, 'index']);
     Route::get('/heartbeats/latest', [HeartBeatController::class, 'latest']);
     Route::post('/heartbeats', [HeartBeatController::class, 'store'])->middleware('throttle:10,1');
+
+    Route::get('/earth-trips', [EarthTripController::class, 'index']);
+    Route::post('/earth-trips', [EarthTripController::class, 'store']);
+    Route::patch('/earth-trips/{tripId}/status', [EarthTripController::class, 'updateStatus']);
+    Route::delete('/earth-trips/{tripId}', [EarthTripController::class, 'destroy']);
 
     Route::post('/routes/plan', [MarsRouteController::class, 'plan'])->middleware('throttle:10,1');
     Route::get('/routes', [MarsRouteController::class, 'index']);

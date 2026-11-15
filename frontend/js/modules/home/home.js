@@ -4,11 +4,44 @@ import { formatCoordinates, formatDistance } from '../../utils/formatters.js';
 import { escapeHtml } from '../../utils/helpers.js';
 import { showEmergencyCenterSwal, showEmergencySweetAlert } from '../../utils/sweetalerts.js';
 import { calculateMarsDistanceKm } from '../../utils/helpers.js';
+import {
+  hideMapLocationTooltip,
+  positionMapLocationTooltip,
+  showMapLocationTooltip,
+} from '../map-location-tooltip.js';
 
 export function createHomeView({ navigateTo }) {
   let currentFilter = 'all';
   let autoRotate = appState.settings.autoRotateGlobe;
   let calloutRaf = 0;
+
+  function showRegionTooltip(regionId) {
+    const region = getRegionById(regionId);
+    if (!region) return;
+
+    showMapLocationTooltip(regionId, {
+      actions: [
+        {
+          label: 'Planear viagem',
+          variant: 'primary',
+          onSelect: () => {
+            appState.plannerSubTab = 'form';
+            appState.editingTripId = null;
+            navigateTo('planner', { prefillDestinationId: region.id });
+          },
+        },
+        {
+          label: 'Consultar IA',
+          variant: 'secondary',
+          onSelect: () => navigateTo('ai', {
+            initialPrompt: `Analisa as condições e riscos de exploração em ${region.name}.`,
+          }),
+        },
+      ],
+    });
+    const globe = getSharedMarsGlobe();
+    if (globe) positionMapLocationTooltip(globe);
+  }
 
   function renderDestinationCard(container) {
     const cardEl = container.querySelector('#home-dest-card');
@@ -101,9 +134,7 @@ export function createHomeView({ navigateTo }) {
 
     cardEl.querySelectorAll('[data-region-id]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        appState.selectedRegionId = btn.dataset.regionId;
-        getSharedMarsGlobe()?.setSelectedRegion(appState.selectedRegionId, true);
-        renderDestinationCard(container);
+        focusRegionOnGlobe(container, btn.dataset.regionId);
       });
     });
 
@@ -120,8 +151,13 @@ export function createHomeView({ navigateTo }) {
 
   function focusRegionOnGlobe(container, regionId) {
     appState.selectedRegionId = regionId;
+    autoRotate = false;
+    getSharedMarsGlobe()?.setAutoRotate(false);
+    const rotateButton = container.querySelector('#globe-toggle-rotate');
+    if (rotateButton) rotateButton.textContent = 'Rodar Globo';
     getSharedMarsGlobe()?.setSelectedRegion(regionId, true);
     renderDestinationCard(container);
+    showRegionTooltip(regionId);
   }
 
   function renderTopAlertCard(container) {
@@ -281,12 +317,11 @@ export function createHomeView({ navigateTo }) {
       if (globe) {
         globe.setMarkerFilter(currentFilter);
         globe.setSelectedRegion(appState.selectedRegionId, false);
-        globe.setOnRegionSelect((regionId) => {
-          appState.selectedRegionId = regionId;
-          renderDestinationCard(container);
-          if (getRegionById(regionId)) appState.selectedRegionId = regionId;
+        globe.setOnRegionSelect((regionId) => focusRegionOnGlobe(container, regionId));
+        globe.setOnFrame(() => {
+          updateProjectedCallouts(container);
+          positionMapLocationTooltip(globe);
         });
-        globe.setOnFrame(() => updateProjectedCallouts(container));
       }
 
       calloutRaf = requestAnimationFrame(() => updateProjectedCallouts(container));
@@ -307,7 +342,7 @@ export function createHomeView({ navigateTo }) {
           alert: matchingAlert,
           title: matchingAlert.title,
           message: matchingAlert.description,
-          regionId: reg.id,
+          regionId,
           onAcknowledge: () => renderTopAlertCard(container),
           onFocusGlobe: (id) => focusRegionOnGlobe(container, id),
         });
@@ -348,6 +383,7 @@ export function createHomeView({ navigateTo }) {
 
     unmount() {
       if (calloutRaf) cancelAnimationFrame(calloutRaf);
+      hideMapLocationTooltip();
       const globe = getSharedMarsGlobe();
       if (globe) {
         globe.setOnFrame(null);

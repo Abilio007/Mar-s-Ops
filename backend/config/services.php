@@ -42,4 +42,15 @@ return [
         'ingest_token' => env('MARS_DATA_INGEST_TOKEN'),
     ],
 
+    'routing' => [
+        'url' => env('ROUTING_OSRM_URL'),
+        'profile' => env('ROUTING_OSRM_PROFILE', 'driving'),
+    ],
+
+    'webpush' => [
+        'public_key' => env('WEBPUSH_VAPID_PUBLIC_KEY'),
+        'private_key' => env('WEBPUSH_VAPID_PRIVATE_KEY'),
+        'subject' => env('WEBPUSH_VAPID_SUBJECT'),
+    ],
+
 ];

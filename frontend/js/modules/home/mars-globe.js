@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { appState } from '../../core/state.js';
 import { clamp, latLonToVector3Args } from '../../utils/helpers.js';
+import marsGlobeTextureUrl from '../../../3D_GLOBE/public/textures/2k_mars.jpg';
 
 const GLOBE_RADIUS = 1.65;
 
@@ -377,6 +378,7 @@ export class MarsGlobe {
     this.raycastTargets = [];
     this.routeGroup = new THREE.Group();
     this.focusDirection = null;
+    this.focusDistance = null;
     this.isDragging = false;
     this.pointerDownPos = { x: 0, y: 0 };
 
@@ -427,6 +429,7 @@ export class MarsGlobe {
 
     this.controls.addEventListener('start', () => {
       this.focusDirection = null;
+      this.focusDistance = null;
     });
 
     // Solar Key + Space Fill + Rim Lights
@@ -462,6 +465,7 @@ export class MarsGlobe {
     });
     this.marsMesh = new THREE.Mesh(marsGeo, marsMat);
     this.planetGroup.add(this.marsMesh);
+    this._loadGlobeTexture(maxAnisotropy);
 
     this.atmosphereMesh = createAtmosphereMesh();
     this.atmosphereMesh.visible = this.options.showAtmosphere;
@@ -494,6 +498,32 @@ export class MarsGlobe {
 
     this.clock = new THREE.Clock();
     this._tick();
+  }
+
+  _loadGlobeTexture(maxAnisotropy) {
+    new THREE.TextureLoader().load(
+      marsGlobeTextureUrl,
+      (texture) => {
+        if (this.disposed) {
+          texture.dispose();
+          return;
+        }
+
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = maxAnisotropy;
+        texture.wrapS = THREE.RepeatWrapping;
+        this.textures.albedoTexture.dispose();
+        this.textures.albedoTexture = texture;
+        this.marsMesh.material.map = texture;
+        this.marsMesh.material.bumpMap = null;
+        this.marsMesh.material.bumpScale = 0;
+        this.marsMesh.material.needsUpdate = true;
+      },
+      undefined,
+      (error) => {
+        console.error('Unable to load the 3D_GLOBE Mars surface texture; keeping the procedural surface.', error);
+      },
+    );
   }
 
   _buildMarkers() {
@@ -709,6 +739,7 @@ export class MarsGlobe {
     });
 
     if (animateCamera) {
+      this.focusDistance = null;
       const targetGroup = this.markerGroups.find((g) => g.userData.region.id === regionId);
       if (targetGroup) {
         this.planetGroup.updateMatrixWorld(true);
@@ -729,6 +760,7 @@ export class MarsGlobe {
 
   resetView() {
     this.focusDirection = null;
+    this.focusDistance = null;
     if (this.camera && this.controls && this.container) {
       const w = Math.max(this.container.clientWidth, 260);
       const h = Math.max(this.container.clientHeight, 240);
@@ -738,6 +770,44 @@ export class MarsGlobe {
       this.controls.target.set(0, 0, 0);
       this.controls.update();
     }
+  }
+
+  fitRouteToView(regionIds = []) {
+    const regions = regionIds
+      .map((id) => appState.regions.find((region) => region.id === id))
+      .filter(Boolean);
+    if (!this.camera || !this.controls || regions.length < 2) return;
+
+    this.planetGroup.updateMatrixWorld(true);
+    const directions = [];
+    for (let index = 0; index < regions.length - 1; index++) {
+      const start = new THREE.Vector3(...latLonToVector3Args(regions[index].lat, regions[index].lon, 1));
+      const end = new THREE.Vector3(...latLonToVector3Args(regions[index + 1].lat, regions[index + 1].lon, 1));
+      this.planetGroup.localToWorld(start).normalize();
+      this.planetGroup.localToWorld(end).normalize();
+
+      for (let segment = 0; segment <= 24; segment++) {
+        const direction = new THREE.Vector3().lerpVectors(start, end, segment / 24);
+        if (direction.lengthSq() > 1e-8) directions.push(direction.normalize());
+      }
+    }
+
+    if (!directions.length) return;
+    const center = directions.reduce((sum, direction) => sum.add(direction), new THREE.Vector3());
+    if (center.lengthSq() < 1e-8) center.copy(directions[0]);
+    center.normalize();
+
+    const maxAngle = directions.reduce(
+      (max, direction) => Math.max(max, Math.acos(clamp(center.dot(direction), -1, 1))),
+      0,
+    );
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+    const halfViewTangent = Math.min(Math.tan(halfFov), Math.tan(halfFov) * this.camera.aspect) * 0.78;
+    const desiredDistance = GLOBE_RADIUS * Math.cos(maxAngle)
+      + (GLOBE_RADIUS * Math.sin(maxAngle)) / Math.max(halfViewTangent, 0.01);
+
+    this.focusDirection = center;
+    this.focusDistance = clamp(desiredDistance, this.controls.minDistance, this.controls.maxDistance);
   }
 
   /**
@@ -831,23 +901,30 @@ export class MarsGlobe {
     const delta = Math.min(this.clock.getDelta(), 0.1);
 
     // Continuous smooth planet rotation around Y axis
-    if (this.options.autoRotate && !this.options.reducedMotion && !this.focusDirection) {
+    if (this.options.autoRotate && !this.options.reducedMotion && !this.focusDirection && this.focusDistance === null) {
       this.planetGroup.rotation.y += delta * 0.11;
     }
 
-    // Smoothly orient camera toward focused region if requested
-    if (this.focusDirection) {
+    if (this.focusDirection || this.focusDistance !== null) {
       const dist = this.camera.position.length();
-      _currentDir.copy(this.camera.position).normalize();
-      _desiredDir.copy(this.focusDirection).normalize();
-
       const alpha = 1 - Math.exp(-5.5 * delta);
-      _currentDir.lerp(_desiredDir, alpha).normalize();
-      _targetCamPos.copy(_currentDir).multiplyScalar(dist);
+      const nextDistance = this.focusDistance === null
+        ? dist
+        : dist + (this.focusDistance - dist) * alpha;
+      _currentDir.copy(this.camera.position).normalize();
+      if (this.focusDirection) {
+        _desiredDir.copy(this.focusDirection).normalize();
+        _currentDir.lerp(_desiredDir, alpha).normalize();
+      }
+      _targetCamPos.copy(_currentDir).multiplyScalar(nextDistance);
       this.camera.position.copy(_targetCamPos);
 
-      if (_currentDir.distanceTo(_desiredDir) < 0.015) {
+      if (this.focusDirection && _currentDir.distanceTo(_desiredDir) < 0.015) {
         this.focusDirection = null;
+      }
+      if (this.focusDistance !== null && Math.abs(nextDistance - this.focusDistance) < 0.015) {
+        this.camera.position.setLength(this.focusDistance);
+        this.focusDistance = null;
       }
     }
 

@@ -21,7 +21,7 @@ Laravel API for location heartbeats, Mars hazard alerts, and AI-generated Marswa
    php artisan reverb:start
    ```
 
-An authenticated client may send `POST /api/heartbeats` with Mars map coordinates in latitude `[-90, 90]` and longitude `[-180, 180]`. Coordinates are user-reported; the API cannot obtain or verify a user's physical location on Mars. The web demo only sends a heartbeat after the user enters coordinates manually; simulated telemetry is never uploaded.
+An authenticated client may send `POST /api/heartbeats` with coordinates in latitude `[-90, 90]` and longitude `[-180, 180]`. Coordinates are user-reported; the API cannot obtain or verify a user's physical location. Heartbeats default to the Mars coordinate system; terrestrial tracking must explicitly send `coordinate_system: "earth"` and is kept out of Mars hazard calculations.
 
 ## API
 
@@ -54,6 +54,13 @@ Register with `POST /api/auth/register` using `name`, `email`, `password`, and `
 | `GET` | `/api/routes/active` | Read the caller's active route |
 | `POST` | `/api/routes/{id}/complete` | Complete an active route |
 | `POST` | `/api/routes/{id}/abort` | Cancel an active route |
+| `GET` | `/api/earth-trips` | List the caller's terrestrial road trips |
+| `POST` | `/api/earth-trips` | Create a terrestrial trip and calculate its road route |
+| `PATCH` | `/api/earth-trips/{id}/status` | Start or finish a terrestrial trip |
+| `DELETE` | `/api/earth-trips/{id}` | Delete a terrestrial trip |
+| `GET` | `/api/notifications/vapid-public-key` | Read the public Web Push VAPID key |
+| `POST` | `/api/push-subscriptions` | Register a browser push subscription |
+| `DELETE` | `/api/push-subscriptions` | Remove the current browser push subscription |
 
 Route planning accepts:
 
@@ -67,6 +74,27 @@ Route planning accepts:
 Subscribe to the authenticated private Reverb channel `mars.user.{user_id}`. Listen for `.mars.alert` and `.mars.route.progress`.
 
 The region catalog is populated by `MarsRegionSeeder` through `php artisan db:seed`; there is no demo account or frontend region fallback. Mission CRUD and operational alert/heartbeat data require Sanctum authentication.
+
+## Terrestrial road routing
+
+Configure `ROUTING_OSRM_URL` to point to a self-hosted OSRM-compatible API that has the required regional road graph, and set `ROUTING_OSRM_PROFILE` (normally `driving`). For example:
+
+```dotenv
+ROUTING_OSRM_URL=http://localhost:5000
+ROUTING_OSRM_PROFILE=driving
+```
+
+The backend requests full GeoJSON road geometry and turn-by-turn steps from `/route/v1/{profile}/...`. GPS coordinates are sent only to this project's backend; the backend then contacts the configured routing service. No public routing service or straight-line fallback is used. If routing is unavailable or no road route exists, the API returns an error instead of creating an inaccurate trip. Run `php artisan migrate` after pulling the change.
+
+## Browser push notifications
+
+Generate one VAPID keypair and keep the private key only in the backend environment:
+
+```powershell
+php artisan tinker --execute="dump(\Minishlink\WebPush\VAPID::createVapidKeys());"
+```
+
+Set `WEBPUSH_VAPID_PUBLIC_KEY`, `WEBPUSH_VAPID_PRIVATE_KEY`, and `WEBPUSH_VAPID_SUBJECT` in the backend `.env`. Use the same keypair across deployments and serve the frontend over HTTPS (or localhost). Users then enable notifications in **Definições → Notificações**. The browser's push relay receives only generic notification text; no GPS coordinates, trip names, or destinations are included in push payloads. The app sends notifications for Mars risk-alert changes and trip lifecycle events; expired subscriptions are removed automatically.
 
 ## Frontend connection
 
