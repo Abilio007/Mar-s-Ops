@@ -23,7 +23,7 @@ io.on("connection", (socket) => {
 });
 
 setInterval(() => {
-  const updateStorm = engine.update(1);
+  const updateStorm = engine.update(3600);
 
   io.emit("storm:update", updateStorm);
 }, 1000);
